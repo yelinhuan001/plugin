@@ -1,0 +1,31 @@
+========================================================
+  没有 Mac？直接拿可用 dylib 的方法（必读）
+========================================================
+
+Windows 无法本地编译 iOS 的 .dylib。
+本文件夹里目前是「源码」，还不是注入文件。
+
+【推荐做法：GitHub 免费云编译，2～5 分钟下载】
+
+详细图文步骤见同目录：
+  无Mac-直接下载dylib.md
+
+简要：
+  1. 注册 github.com
+  2. 新建空仓库
+  3. 把本文件夹全部内容上传（必须包含 .github 文件夹）
+  4. 打开 Actions，等 Build iOS dylib 变绿
+  5. 页面底部 Artifacts 下载 TrollDylibPlugin-dylib
+  6. 解压得到 TrollDylibPlugin.dylib
+  7. 用 TrollFools / 巨魔助手 注入到目标 App
+
+【注入】
+  TrollFools → 选 App → 注入 dylib → 强杀再开
+  成功会弹窗：巨魔插件 / 插件已注入
+
+【改功能】
+  编辑 src\TweakStandalone.m 后重新上传并再跑 Actions
+
+【说明】
+  我无法在 Windows 上直接生成能装进 iPhone 的 dylib 二进制，
+  云编译产物 = 你自己有 Mac 时编出来的文件，可直接用。

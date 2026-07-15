@@ -1,0 +1,9 @@
+Package: com.example.trolldylibplugin
+Name: TrollDylibPlugin
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: iOS 14 巨魔 dylib 插件示例 - 通用 Hook 模板
+Maintainer: You
+Author: You
+Section: Tweaks

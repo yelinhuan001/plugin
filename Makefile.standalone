@@ -1,0 +1,37 @@
+# ============================================================
+# 无 Theos 时的备用编译脚本（需 macOS + Xcode Command Line Tools）
+# 在 Mac 上执行: make -f Makefile.standalone
+# ============================================================
+
+IOS_SDK ?= $(shell xcrun --sdk iphoneos --show-sdk-path)
+MIN_IOS  ?= 14.0
+ARCH     ?= arm64
+CC       ?= $(shell xcrun --sdk iphoneos -f clang)
+
+CFLAGS = -isysroot $(IOS_SDK) -arch $(ARCH) -miphoneos-version-min=$(MIN_IOS) \
+         -fobjc-arc -fPIC -O2 -Wall \
+         -Wno-unused-variable -Wno-deprecated-declarations
+
+LDFLAGS = -isysroot $(IOS_SDK) -arch $(ARCH) -miphoneos-version-min=$(MIN_IOS) \
+          -dynamiclib -framework Foundation -framework UIKit \
+          -install_name @rpath/TrollDylibPlugin.dylib
+
+# 无 Logos 预处理器时，用纯 ObjC 入口（TweakStandalone.m）
+SRC = src/TweakStandalone.m src/HookHelper.m src/fishhook.c
+OUT = packages/TrollDylibPlugin.dylib
+
+.PHONY: all clean
+
+all: $(OUT)
+
+packages:
+	mkdir -p packages
+
+$(OUT): $(SRC) | packages
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC)
+	@echo "[*] 已输出: $@"
+	@codesign -s - $@ 2>/dev/null || true
+	@ls -la $@
+
+clean:
+	rm -rf packages
