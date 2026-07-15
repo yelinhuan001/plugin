@@ -11,7 +11,8 @@ CFLAGS = -isysroot $(IOS_SDK) -arch $(ARCH) -miphoneos-version-min=$(MIN_IOS) \
          -Wno-unused-variable -Wno-deprecated-declarations -Wno-unused-function
 
 LDFLAGS = -isysroot $(IOS_SDK) -arch $(ARCH) -miphoneos-version-min=$(MIN_IOS) \
-          -dynamiclib -framework Foundation -framework UIKit \
+          -dynamiclib \
+          -framework Foundation -framework UIKit -framework CoreGraphics \
           -install_name @rpath/TrollDylibPlugin.dylib
 
 SRC = \

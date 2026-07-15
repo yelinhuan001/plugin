@@ -16,7 +16,7 @@ TrollDylibPlugin_FILES = \
 	src/fishhook.c
 
 TrollDylibPlugin_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-deprecated-declarations
-TrollDylibPlugin_FRAMEWORKS = UIKit Foundation
+TrollDylibPlugin_FRAMEWORKS = UIKit Foundation CoreGraphics
 TrollDylibPlugin_LDFLAGS = -Wl,-install_name,@rpath/TrollDylibPlugin.dylib
 
 include $(THEOS_MAKE_PATH)/tweak.mk
