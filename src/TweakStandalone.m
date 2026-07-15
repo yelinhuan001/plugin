@@ -1,124 +1,106 @@
 //
-// TweakStandalone.m — 无 Theos/Logos 的纯 ObjC 入口
-// 配合 Makefile.standalone 编译，产物可直接给 TrollFools 注入
+// TweakStandalone.m — 巨魔通用插件入口
+// 功能：悬浮球 · 会员扫描/启发式修改 · 去广告（全 App 注入）
 //
 
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
-#import <objc/runtime.h>
 #import <unistd.h>
-#import "HookHelper.h"
-#import "fishhook.h"
+#import "TDPConfig.h"
+#import "TDPFloatingBall.h"
+#import "TDPVipEngine.h"
+#import "TDPAdBlocker.h"
 
 #define TDPLog(fmt, ...) NSLog(@"[TrollDylibPlugin] " fmt, ##__VA_ARGS__)
 
-/// 目标 Bundle ID，为空表示不限制（仍会跳过大部分 com.apple.*）
-static NSString * const kTargetBundleID = @"";
-static NSString * const kPluginVersion  = @"1.0.0";
+static NSString * const kPluginVersion = @"2.0.0";
 
+/// 是否应在本进程启用（尽量覆盖第三方 App，跳过大部分系统进程）
 static BOOL TDP_ShouldActivate(void) {
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
     if (bid.length == 0) return NO;
-    if ([bid hasPrefix:@"com.apple."] && ![bid isEqualToString:@"com.apple.springboard"]) {
-        return NO;
+
+    // 明确跳过的系统/注入工具
+    NSArray *skip = @[
+        @"com.apple.springboard",
+        @"com.apple.SafariViewService",
+        @"com.opa334.TrollStore",
+        @"com.opa334.TrollStoreLite",
+        @"ru.extraterminal.trollfools",
+    ];
+    for (NSString *s in skip) {
+        if ([bid isEqualToString:s]) return NO;
     }
-    if (kTargetBundleID.length > 0 && ![bid isEqualToString:kTargetBundleID]) {
+
+    // 系统守护 / 扩展一般不注入；允许少量带 UI 的
+    if ([bid hasPrefix:@"com.apple."]) {
+        // 如需调试系统 App 可改这里
         return NO;
     }
     return YES;
 }
 
-static void TDP_ShowToast(NSString *msg) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *window = nil;
-        if (@available(iOS 13.0, *)) {
-            for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes) {
-                if (scene.activationState != UISceneActivationStateForegroundActive) continue;
-                for (UIWindow *w in scene.windows) {
-                    if (w.isKeyWindow) { window = w; break; }
-                }
-                if (window) break;
-            }
-        }
-        if (!window) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            window = UIApplication.sharedApplication.keyWindow;
-#pragma clang diagnostic pop
-        }
-        UIViewController *root = window.rootViewController;
-        while (root.presentedViewController) root = root.presentedViewController;
-        if (!root) return;
-
-        UIAlertController *alert =
-            [UIAlertController alertControllerWithTitle:@"巨魔插件"
-                                                message:msg
-                                         preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:nil]];
-        [root presentViewController:alert animated:YES completion:nil];
-    });
-}
-
-#pragma mark - Hook: UIViewController viewDidAppear:
-
-static IMP orig_viewDidAppear = NULL;
-
-static void hook_viewDidAppear(id self, SEL _cmd, BOOL animated) {
-    if (orig_viewDidAppear) {
-        ((void (*)(id, SEL, BOOL))orig_viewDidAppear)(self, _cmd, animated);
+static void TDP_ApplyFeatures(void) {
+    TDPConfig *cfg = TDPConfig.shared;
+    if (cfg.forceVip) {
+        NSInteger n = [TDPVipEngine.shared applyForceVip];
+        TDPLog(@"forceVip written~%ld", (long)n);
+    } else {
+        // 仅扫描，便于面板查看
+        [TDPVipEngine.shared scan];
     }
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        TDPLog(@"viewDidAppear first hit: %@", NSStringFromClass([self class]));
-    });
+    if (cfg.blockAds) {
+        [TDPAdBlocker.shared install];
+    }
 }
 
-static void TDP_InstallHooks(void) {
-    Class cls = NSClassFromString(@"UIViewController");
-    BOOL ok = TDP_SwizzleInstanceMethod(cls,
-                                        @selector(viewDidAppear:),
-                                        (IMP)hook_viewDidAppear,
-                                        &orig_viewDidAppear);
-    TDPLog(@"swizzle viewDidAppear: %@", ok ? @"OK" : @"FAIL");
-}
-
-#pragma mark - 业务扩展示例
-
-/// 在这里写你自己的 Hook / 逻辑
-static void TDP_CustomLogic(void) {
-    // 示例：读取/修改 UserDefaults
-    // NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    // [ud setBool:YES forKey:@"isVip"];
-    // [ud synchronize];
-
-    // 示例：Hook 某个 App 私有类
-    // Class target = NSClassFromString(@"SomePrivateClass");
-    // TDP_SwizzleInstanceMethod(target, @selector(isPremium), (IMP)hook_isPremium, &orig_isPremium);
-}
-
-#pragma mark - 入口
-
-__attribute__((constructor))
-static void TDP_Entry(void) {
+static void TDP_Bootstrap(void) {
     @autoreleasepool {
         NSString *bid = [[NSBundle mainBundle] bundleIdentifier] ?: @"(null)";
-        TDPLog(@"loaded v%@ pid=%d bundle=%@", kPluginVersion, getpid(), bid);
+        TDPLog(@"v%@ pid=%d bundle=%@", kPluginVersion, getpid(), bid);
 
         if (!TDP_ShouldActivate()) {
             TDPLog(@"skip %@", bid);
             return;
         }
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+        // 等 UI 起来
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            TDP_InstallHooks();
-            TDP_CustomLogic();
-            NSString *msg = [NSString stringWithFormat:@"插件已注入\n%@\nv%@", bid, kPluginVersion];
-            TDP_ShowToast(msg);
+            TDPConfig *cfg = TDPConfig.shared;
+
+            if (cfg.autoApply) {
+                TDP_ApplyFeatures();
+            }
+
+            [TDPFloatingBall.shared startIfNeeded];
+
+            if (cfg.toastEnabled) {
+                NSString *msg = [NSString stringWithFormat:@"工具箱已加载 v%@\n点悬浮球「魔」打开面板", kPluginVersion];
+                [TDPFloatingBall.shared toast:msg];
+            }
+
+            TDPLog(@"ready forceVip=%d blockAds=%d", cfg.forceVip, cfg.blockAds);
         });
+
+        // App 回到前台时再 scrub 一次广告
+        [[NSNotificationCenter defaultCenter]
+         addObserverForName:UIApplicationDidBecomeActiveNotification
+         object:nil queue:[NSOperationQueue mainQueue]
+         usingBlock:^(__unused NSNotification *note) {
+            if (TDPConfig.shared.blockAds) {
+                [TDPAdBlocker.shared scrubVisibleAds];
+            }
+            if (TDPConfig.shared.showFloatingBall) {
+                [TDPFloatingBall.shared startIfNeeded];
+            }
+        }];
     }
+}
+
+__attribute__((constructor))
+static void TDP_Entry(void) {
+    TDP_Bootstrap();
 }
 
 __attribute__((destructor))

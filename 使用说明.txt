@@ -1,31 +1,43 @@
 ========================================================
-  没有 Mac？直接拿可用 dylib 的方法（必读）
+  巨魔通用工具箱 v2.0  — 悬浮球 / 会员 / 去广告
 ========================================================
 
-Windows 无法本地编译 iOS 的 .dylib。
-本文件夹里目前是「源码」，还不是注入文件。
+【功能】
+  1. 悬浮球界面（可拖动，点「魔」打开面板）
+  2. 针对注入的 App：扫描会员相关本地数据
+  3. 启发式「强制会员」（UserDefaults + isVip 等方法 Hook）
+  4. 启发式去广告（隐藏广告视图 + 拦截常见广告 SDK）
 
-【推荐做法：GitHub 免费云编译，2～5 分钟下载】
+【重要限制 — 请先读】
+  · 必须用 TrollFools 把 dylib 注入到「每个」目标 App
+    （不是系统级全局，巨魔注入是按 App 的）
+  · 会员：只对「纯本地判断」的简单 App 可能有效
+    服务端校验 / IAP 收据 / 加密登录态 → 无法本地改成真会员
+  · 去广告：不能保证 100% 去掉所有广告联盟
+  · 仅建议用于自己的设备学习调试，勿用于盗版传播
 
-详细图文步骤见同目录：
-  无Mac-直接下载dylib.md
-
-简要：
-  1. 注册 github.com
-  2. 新建空仓库
-  3. 把本文件夹全部内容上传（必须包含 .github 文件夹）
-  4. 打开 Actions，等 Build iOS dylib 变绿
-  5. 页面底部 Artifacts 下载 TrollDylibPlugin-dylib
-  6. 解压得到 TrollDylibPlugin.dylib
-  7. 用 TrollFools / 巨魔助手 注入到目标 App
+【编译（无 Mac 用 GitHub Actions）】
+  见：无Mac-直接下载dylib.md
+  上传本工程 → Actions 变绿 → 下载 TrollDylibPlugin.dylib
 
 【注入】
-  TrollFools → 选 App → 注入 dylib → 强杀再开
-  成功会弹窗：巨魔插件 / 插件已注入
+  1. TrollFools 选择 App → 注入 TrollDylibPlugin.dylib
+  2. 强杀后打开 App
+  3. 出现蓝色悬浮球「魔」
+  4. 点开面板：
+       - 打开「强制会员」或点「立即应用强制会员」
+       - 打开「去广告」
+       - 「扫描会员状态」看本地识别结果
 
-【改功能】
-  编辑 src\TweakStandalone.m 后重新上传并再跑 Actions
+【面板说明】
+  显示悬浮球     隐藏/显示球
+  强制会员       写入本地 vip 标记 + Hook 常见 isVip 方法
+  去广告         定时清理广告视图 + Hook 广告 load/show
+  启动自动应用   下次打开 App 按开关自动执行
+  扫描/明细      看识别到了哪些 key 和方法
 
-【说明】
-  我无法在 Windows 上直接生成能装进 iPhone 的 dylib 二进制，
-  云编译产物 = 你自己有 Mac 时编出来的文件，可直接用。
+【日志】
+  控制台过滤：TrollDylibPlugin
+
+【版本】
+  2.0.0  悬浮球 + 会员引擎 + 去广告
