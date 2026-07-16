@@ -6,30 +6,30 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find SDK & Compile
+      - name: 诊断环境
+        run: |
+          echo "=== 系统信息 ==="
+          uname -a
+          echo "=== Xcode ==="
+          xcode-select -p 2>&1
+          xcrun --show-sdk-path 2>&1 || true
+          xcrun --sdk iphoneos --show-sdk-path 2>&1 || true
+          echo "=== SDK 文件 ==="
+          find /Applications -name "iPhoneOS.sdk" -maxdepth 6 2>/dev/null || true
+          find /Library -name "iPhoneOS.sdk" -maxdepth 6 2>/dev/null || true
+          echo "=== clang ==="
+          clang --version 2>&1 || true
+
+      - name: 编译
         run: |
           set -e
-          echo "=== Xcode ==="
-          ls /Applications/ | grep -i xcode || echo "No Xcode in /Applications"
-          xcodebuild -version 2>/dev/null || echo "xcodebuild not available"
-          SDK=""
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null) && echo "方式1 OK" || echo "方式1 失败"
-          if [ -z "$SDK" ]; then
-            SDK=$(find /Applications -name "iPhoneOS.sdk" -type d 2>/dev/null | head -1) && echo "方式2 OK" || echo "方式2 失败"
-          fi
-          if [ -z "$SDK" ]; then
-            SDK=$(find /Library/Developer -name "iPhoneOS.sdk" -type d 2>/dev/null | head -1) && echo "方式3 OK" || echo "方式3 失败"
-          fi
-          if [ -z "$SDK" ]; then
-            echo "❌ 所有方式都无法找到 iOS SDK"
-            exit 1
-          fi
-          echo "✅ 找到 SDK: $SDK"
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path 2>&1)
+          echo "SDK路径: $SDK"
           mkdir -p packages
           clang -shared \
             -fobjc-arc -I. \
@@ -38,11 +38,11 @@ jobs:
             -miphoneos-version-min=14.0 \
             -lobjc -framework UIKit -framework Foundation \
             ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m \
-            -o packages/ClassDumpDylib.dylib 2>&1
-          echo "✅ 编译完成"
+            -o packages/ClassDumpDylib.dylib
+          echo "✅ 编译成功"
           ls -lh packages/
 
-      - name: Upload .dylib
+      - name: 上传
         uses: actions/upload-artifact@v4
         with:
           name: ClassDumpDylib
