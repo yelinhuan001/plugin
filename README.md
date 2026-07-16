@@ -1,51 +1,73 @@
-# ClassDumpSearch
+# plugin（yelinhuan001）
 
-iOS 注入式 dylib：在目标 App 进程内用 Objective-C Runtime 搜索类名 / 方法名 / 属性名，生成 Markdown 分析报告并复制到剪贴板。
+巨魔可注入 dylib 工具箱 + ClassDump 检索。
 
-**定位：仅检索与分析，不自动 Hook、不强制会员、不修改方法返回值。** 是否 Hook 由你自己手动决定。
+**当前策略：默认全手动，不强制会员、不自动去广告，降低闪退概率。**
 
-## 功能
+仓库：https://github.com/yelinhuan001/plugin
 
-1. Runtime 遍历已加载 ObjC 类，按关键词搜索（不区分大小写）
-2. 匹配类名、实例方法、类方法、属性
-3. 输出 Markdown 报告到 `UIPasteboard`
-4. 可选顶层 `UIWindow` 搜索面板（手动输入关键词）
+---
 
-## 文件
+## 你该注入哪个文件？
 
-| 文件 | 说明 |
-|------|------|
-| `ClassDumpSearch.h/m` | 核心检索 + 报告 + 剪贴板 |
-| `CDSOverlay.h/m` | 悬浮搜索 UI |
-| `TweakEntry.m` | dylib 构造函数入口 |
+| 产物 | 说明 | 建议 |
+|------|------|------|
+| `TrollDylibPlugin.dylib` | 悬浮球「魔」面板：扫描会员 / 手动开关 | 功能完整 |
+| `ClassDumpSearch.dylib` | 仅关键词检索 + 报告剪贴板 | 做 AI 分析 |
+| `ClassDumpSearch-noauto.dylib` | 同上但不自动弹窗 | **最稳，闪退时优先** |
 
-## 编译（需 macOS + Xcode / 交叉工具链）
+下载：仓库 **Actions** → 最新成功构建 → Artifact **`compiled-dylibs`**
 
-源码可在 Windows 上编辑；编译 arm64 dylib 通常需要 Mac 或已有 iOS 工具链。
+---
 
-```bash
-xcrun -sdk iphoneos clang -arch arm64 -shared -fobjc-arc \
-  -miphoneos-version-min=14.0 \
-  -framework Foundation -framework UIKit \
-  ClassDumpSearch.m CDSOverlay.m TweakEntry.m \
-  -o ClassDumpSearch.dylib
+## 没有 Mac 怎么编译？
+
+1. 把本仓库代码推到 GitHub（你已有：`yelinhuan001/plugin`）
+2. 打开 [Actions](https://github.com/yelinhuan001/plugin/actions)
+3. 等 **Build Dylib** 变绿
+4. 下载 **compiled-dylibs**，解压得到 `.dylib`
+5. 用 **TrollFools** 注入目标 App → 巨魔安装
+
+本地 Windows **不能**编 iOS dylib；云 Mac（Actions）可以。
+
+更省事、不注入：用 `frida/class_dump_search.js`（需 frida-server）。
+
+```text
+frida -U -f 包名 -l frida/class_dump_search.js --no-pause
+rpc.exports.search("vip", 200)
 ```
 
-## 注入（iOS 14+ / 巨魔 TrollStore 思路）
+---
 
-用 TrollFools、insert_dylib 等工具将 `ClassDumpSearch.dylib` 插入目标 App，重新签名后安装。具体步骤因工具而异。
+## 默认行为（v2.1 safe）
 
-## 使用
+| 开关 | 默认 | 说明 |
+|------|------|------|
+| 悬浮球 | 开 | 约 5 秒后出现「魔」 |
+| 强制会员 | **关** | 面板里手动开 |
+| 去广告 | **关** | 面板里手动开 |
+| 启动自动应用 | **关** | 避免一启动就 Hook 闪退 |
 
-1. App 启动约 3 秒后弹出搜索面板（可在 `TweakEntry.m` 关闭 `CDS_AUTO_SHOW_OVERLAY`）
-2. 输入关键词（如 `vip`）→ 点「搜索」
-3. 报告显示在面板中，并已复制到剪贴板，可粘贴给 AI 分析
-4. 默认只搜索 App 自身 image 内的类；全进程扫描请调用：
+### 已修闪退点
 
-```objc
-[ClassDumpSearch setSearchAppOwnClassesOnly:NO];
+- 去掉 `makeKeyAndVisible`（抢焦点）
+- constructor 不碰 UI / 不立刻 Hook
+- 等 `DidBecomeActive` 再延迟启动
+- 扫描类时跳过元类 + 异常隔离
+
+---
+
+## 目录
+
+```text
+src/                 TrollDylibPlugin 主工程
+ClassDumpSearch.*    纯检索 dylib 源码
+frida/               无编译检索脚本
+.github/workflows/   云编译
 ```
+
+---
 
 ## 免责声明
 
-仅供学习与对你有权分析的应用做安全研究。请遵守当地法律与软件许可协议。
+仅供学习与对你有权分析的软件做研究。请遵守法律与许可协议。

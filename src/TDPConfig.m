@@ -19,11 +19,12 @@ static NSString * const kToast     = @"TDP_toastEnabled";
 
 - (void)reload {
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-    // 首次默认值
+    // 首次默认：全手动，避免启动自动 Hook 导致闪退
+    // forceVip / blockAds / autoApply 全部默认 OFF
     if ([ud objectForKey:kShowBall] == nil)  [ud setBool:YES forKey:kShowBall];
     if ([ud objectForKey:kForceVip] == nil)  [ud setBool:NO  forKey:kForceVip];
-    if ([ud objectForKey:kBlockAds] == nil)  [ud setBool:YES forKey:kBlockAds];
-    if ([ud objectForKey:kAutoApply] == nil) [ud setBool:YES forKey:kAutoApply];
+    if ([ud objectForKey:kBlockAds] == nil)  [ud setBool:NO  forKey:kBlockAds];
+    if ([ud objectForKey:kAutoApply] == nil) [ud setBool:NO  forKey:kAutoApply];
     if ([ud objectForKey:kToast] == nil)     [ud setBool:YES forKey:kToast];
     [ud synchronize];
 

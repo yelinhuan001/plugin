@@ -110,50 +110,62 @@ static NSInteger TDP_HookIntOne(id self, SEL _cmd) {
         [hits addObject:h];
     }
 
-    // 2) 方法名扫描（限制数量，避免卡顿）
+    // 2) 方法名扫描（限制数量 + 异常隔离，避免闪退）
     unsigned int classCount = 0;
-    Class *classes = objc_copyClassList(&classCount);
+    Class *classes = NULL;
+    @try {
+        classes = objc_copyClassList(&classCount);
+    } @catch (__unused NSException *e) {
+        classes = NULL;
+        classCount = 0;
+    }
     NSInteger methodHits = 0;
     const NSInteger kMaxMethodHits = 80;
     for (unsigned int i = 0; i < classCount && methodHits < kMaxMethodHits; i++) {
-        Class cls = classes[i];
-        const char *cname = class_getName(cls);
-        if (!cname) continue;
-        // 跳过系统大量类
-        if (strncmp(cname, "OS_", 3) == 0) continue;
-        if (strncmp(cname, "_", 1) == 0) continue;
-        NSString *cn = [NSString stringWithUTF8String:cname];
-        if ([cn hasPrefix:@"NS"] || [cn hasPrefix:@"UI"] || [cn hasPrefix:@"CA"] ||
-            [cn hasPrefix:@"CF"] || [cn hasPrefix:@"Swift"] || [cn hasPrefix:@"__"]) continue;
+        @try {
+            Class cls = classes[i];
+            if (!cls || class_isMetaClass(cls)) continue;
+            const char *cname = class_getName(cls);
+            if (!cname) continue;
+            if (strncmp(cname, "OS_", 3) == 0) continue;
+            if (strncmp(cname, "_", 1) == 0) continue;
+            NSString *cn = [NSString stringWithUTF8String:cname];
+            if ([cn hasPrefix:@"NS"] || [cn hasPrefix:@"UI"] || [cn hasPrefix:@"CA"] ||
+                [cn hasPrefix:@"CF"] || [cn hasPrefix:@"Swift"] || [cn hasPrefix:@"__"]) continue;
 
-        unsigned int mcount = 0;
-        Method *methods = class_copyMethodList(cls, &mcount);
-        for (unsigned int j = 0; j < mcount && methodHits < kMaxMethodHits; j++) {
-            SEL sel = method_getName(methods[j]);
-            NSString *selName = NSStringFromSelector(sel);
-            BOOL match = NO;
-            for (NSString *hint in TDP_VipSelectorHints()) {
-                if ([selName isEqualToString:hint] ||
-                    [selName.lowercaseString containsString:hint.lowercaseString]) {
-                    match = YES;
-                    break;
+            unsigned int mcount = 0;
+            Method *methods = class_copyMethodList(cls, &mcount);
+            if (!methods) continue;
+            for (unsigned int j = 0; j < mcount && methodHits < kMaxMethodHits; j++) {
+                SEL sel = method_getName(methods[j]);
+                if (!sel) continue;
+                NSString *selName = NSStringFromSelector(sel);
+                BOOL match = NO;
+                for (NSString *hint in TDP_VipSelectorHints()) {
+                    if ([selName isEqualToString:hint] ||
+                        [selName.lowercaseString containsString:hint.lowercaseString]) {
+                        match = YES;
+                        break;
+                    }
                 }
+                if (!match) continue;
+
+                char *types = method_copyReturnType(methods[j]);
+                NSString *ret = types ? [NSString stringWithUTF8String:types] : @"?";
+                if (types) free(types);
+
+                TDPVipHit *h = [TDPVipHit new];
+                h.source = @"Method";
+                h.name = [NSString stringWithFormat:@"-[%@ %@]", cn, selName];
+                h.valueDescription = [NSString stringWithFormat:@"ret=%@", ret];
+                h.looksLikeVipTrue = NO;
+                [hits addObject:h];
+                methodHits++;
             }
-            if (!match) continue;
-
-            char *types = method_copyReturnType(methods[j]);
-            NSString *ret = types ? [NSString stringWithUTF8String:types] : @"?";
-            if (types) free(types);
-
-            TDPVipHit *h = [TDPVipHit new];
-            h.source = @"Method";
-            h.name = [NSString stringWithFormat:@"-[%@ %@]", cn, selName];
-            h.valueDescription = [NSString stringWithFormat:@"ret=%@", ret];
-            h.looksLikeVipTrue = NO;
-            [hits addObject:h];
-            methodHits++;
+            free(methods);
+        } @catch (__unused NSException *e) {
+            continue;
         }
-        if (methods) free(methods);
     }
     if (classes) free(classes);
 

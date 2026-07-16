@@ -12,13 +12,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// 是否显示悬浮球（默认 YES）
 @property (nonatomic, assign) BOOL showFloatingBall;
-/// 启发式强制会员（默认 NO，需用户手动开）
+/// 启发式强制会员（默认 NO，需在面板手动开）
 @property (nonatomic, assign) BOOL forceVip;
-/// 去广告（默认 YES）
+/// 去广告（默认 NO，需在面板手动开）
 @property (nonatomic, assign) BOOL blockAds;
-/// 启动后自动应用会员/广告策略（默认 YES）
+/// 启动后自动应用（默认 NO，防止闪退；需手动开）
 @property (nonatomic, assign) BOOL autoApply;
-/// 弹窗提示重要操作（默认 YES）
+/// 弹窗提示（默认 YES）
 @property (nonatomic, assign) BOOL toastEnabled;
 
 - (void)reload;

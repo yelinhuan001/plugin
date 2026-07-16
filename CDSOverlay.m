@@ -1,4 +1,5 @@
 // CDSOverlay.m
+// 防闪退：不 makeKeyAndVisible 抢焦点、检查 UIApplication、主线程、异常保护
 
 #import "CDSOverlay.h"
 #import "ClassDumpSearch.h"
@@ -9,111 +10,241 @@
 static UIWindow *sWindow;
 static UITextField *sField;
 static UITextView *sResult;
+static UIView *sPanel;
+static BOOL sSearching;
+
++ (BOOL)isVisible {
+    return sWindow != nil && !sWindow.hidden;
+}
+
++ (BOOL)cds_uiReady {
+    @try {
+        UIApplication *app = [UIApplication sharedApplication];
+        if (!app) return NO;
+        // applicationState 在未启动完时可能不安全，仅判断对象存在
+        return YES;
+    } @catch (__unused NSException *e) {
+        return NO;
+    }
+}
+
++ (UIWindowScene *)cds_activeScene {
+    @try {
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *sc in [UIApplication sharedApplication].connectedScenes) {
+                if (![sc isKindOfClass:[UIWindowScene class]]) continue;
+                if (sc.activationState == UISceneActivationStateForegroundActive ||
+                    sc.activationState == UISceneActivationStateForegroundInactive) {
+                    return (UIWindowScene *)sc;
+                }
+            }
+            for (UIScene *sc in [UIApplication sharedApplication].connectedScenes) {
+                if ([sc isKindOfClass:[UIWindowScene class]]) {
+                    return (UIWindowScene *)sc;
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return nil;
+}
 
 + (void)show {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (sWindow) {
-            sWindow.hidden = NO;
-            [sWindow makeKeyAndVisible];
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self show]; });
+        return;
+    }
+
+    @try {
+        if (![self cds_uiReady]) {
+            NSLog(@"[ClassDumpSearch] UI not ready, skip show");
             return;
         }
 
-        UIWindowScene *scene = nil;
-        for (UIScene *sc in [UIApplication sharedApplication].connectedScenes) {
-            if (sc.activationState == UISceneActivationStateForegroundActive &&
-                [sc isKindOfClass:[UIWindowScene class]]) {
-                scene = (UIWindowScene *)sc;
-                break;
-            }
+        if (sWindow && !sWindow.hidden) {
+            return;
         }
 
+        if (sWindow) {
+            sWindow.hidden = NO;
+            return;
+        }
+
+        CGRect screenBounds = [UIScreen mainScreen].bounds;
+        if (CGRectIsEmpty(screenBounds) || screenBounds.size.width < 1) {
+            return;
+        }
+
+        UIWindowScene *scene = [self cds_activeScene];
         if (scene) {
             sWindow = [[UIWindow alloc] initWithWindowScene:scene];
+            sWindow.frame = screenBounds;
         } else {
-            sWindow = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+            sWindow = [[UIWindow alloc] initWithFrame:screenBounds];
         }
 
-        sWindow.windowLevel = UIWindowLevelAlert + 100;
+        // 高 window但不要抢 keyWindow：很多 App 对 makeKeyAndVisible 敏感导致闪退
+        sWindow.windowLevel = UIWindowLevelStatusBar + 50;
         sWindow.backgroundColor = [UIColor clearColor];
+        sWindow.userInteractionEnabled = YES;
+        sWindow.hidden = NO;
+        // 故意不调用 makeKeyAndVisible
 
         UIViewController *vc = [UIViewController new];
         vc.view.backgroundColor = [UIColor clearColor];
+        vc.view.frame = screenBounds;
 
-        CGFloat W = UIScreen.mainScreen.bounds.size.width;
-        UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(20, 80, W - 40, 380)];
-        panel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.88];
-        panel.layer.cornerRadius = 12;
-        panel.clipsToBounds = YES;
+        CGFloat panelW = MIN(screenBounds.size.width - 24.0, 400.0);
+        CGFloat panelH = 400.0;
+        CGFloat panelX = (screenBounds.size.width - panelW) * 0.5;
+        CGFloat panelY = MAX(60.0, screenBounds.size.height * 0.12);
 
-        UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(12, 8, panel.bounds.size.width - 24, 22)];
-        title.text = @"Class Dump 检索（仅分析）";
-        title.textColor = UIColor.whiteColor;
+        sPanel = [[UIView alloc] initWithFrame:CGRectMake(panelX, panelY, panelW, panelH)];
+        sPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.90];
+        sPanel.layer.cornerRadius = 12.0;
+        sPanel.clipsToBounds = YES;
+        sPanel.userInteractionEnabled = YES;
+
+        UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(12, 10, panelW - 24, 22)];
+        title.text = @"ClassDump 检索（仅分析）";
+        title.textColor = [UIColor whiteColor];
         title.font = [UIFont boldSystemFontOfSize:15];
+        title.userInteractionEnabled = NO;
 
-        sField = [[UITextField alloc] initWithFrame:CGRectMake(12, 36, panel.bounds.size.width - 100, 36)];
-        sField.placeholder = @"关键词 e.g. vip";
+        sField = [[UITextField alloc] initWithFrame:CGRectMake(12, 40, panelW - 100, 36)];
+        sField.placeholder = @"关键词 如 vip";
         sField.borderStyle = UITextBorderStyleRoundedRect;
         sField.autocapitalizationType = UITextAutocapitalizationTypeNone;
         sField.autocorrectionType = UITextAutocorrectionTypeNo;
-        sField.backgroundColor = UIColor.whiteColor;
+        sField.spellCheckingType = UITextSpellCheckingTypeNo;
+        sField.returnKeyType = UIReturnKeySearch;
+        sField.backgroundColor = [UIColor whiteColor];
+        sField.textColor = [UIColor blackColor];
+        sField.clearButtonMode = UITextFieldViewModeWhileEditing;
 
         UIButton *searchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        searchBtn.frame = CGRectMake(CGRectGetMaxX(sField.frame) + 8, 36, 70, 36);
+        searchBtn.frame = CGRectMake(panelW - 80, 40, 68, 36);
         [searchBtn setTitle:@"搜索" forState:UIControlStateNormal];
-        [searchBtn setTitleColor:UIColor.cyanColor forState:UIControlStateNormal];
+        [searchBtn setTitleColor:[UIColor cyanColor] forState:UIControlStateNormal];
         [searchBtn addTarget:self action:@selector(onSearch) forControlEvents:UIControlEventTouchUpInside];
 
-        sResult = [[UITextView alloc] initWithFrame:CGRectMake(12, 80, panel.bounds.size.width - 24, 250)];
+        sResult = [[UITextView alloc] initWithFrame:CGRectMake(12, 88, panelW - 24, panelH - 140)];
         sResult.editable = NO;
-        sResult.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
-        sResult.textColor = UIColor.greenColor;
-        sResult.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.5];
-        sResult.text = @"输入关键词后点搜索。\n结果会复制到剪贴板，方便粘贴给 AI。\n\n不会修改任何方法返回值或会员状态。";
+        sResult.selectable = YES;
+        UIFont *mono = [UIFont fontWithName:@"Menlo-Regular" size:11];
+        if (!mono) mono = [UIFont systemFontOfSize:11];
+        sResult.font = mono;
+        sResult.textColor = [UIColor colorWithRed:0.4 green:1.0 blue:0.4 alpha:1.0];
+        sResult.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.55];
+        sResult.text = @"使用说明：\n"
+                        "1. 输入关键词后点搜索\n"
+                        "2. 结果自动复制到剪贴板\n"
+                        "3. 仅分析，不会改会员/返回值\n\n"
+                        "若 App 异常，请只用 Frida 版脚本。";
 
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-        closeBtn.frame = CGRectMake(12, 338, panel.bounds.size.width - 24, 32);
+        closeBtn.frame = CGRectMake(12, panelH - 44, panelW - 24, 36);
         [closeBtn setTitle:@"关闭" forState:UIControlStateNormal];
-        [closeBtn setTitleColor:UIColor.lightGrayColor forState:UIControlStateNormal];
+        [closeBtn setTitleColor:[UIColor lightGrayColor] forState:UIControlStateNormal];
         [closeBtn addTarget:self action:@selector(onClose) forControlEvents:UIControlEventTouchUpInside];
 
-        [panel addSubview:title];
-        [panel addSubview:sField];
-        [panel addSubview:searchBtn];
-        [panel addSubview:sResult];
-        [panel addSubview:closeBtn];
-        [vc.view addSubview:panel];
+        [sPanel addSubview:title];
+        [sPanel addSubview:sField];
+        [sPanel addSubview:searchBtn];
+        [sPanel addSubview:sResult];
+        [sPanel addSubview:closeBtn];
+        [vc.view addSubview:sPanel];
+
+        // 轻扫关闭（减少误触崩溃面）
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onPan:)];
+        [sPanel addGestureRecognizer:pan];
 
         sWindow.rootViewController = vc;
+        // 再次强调：不 makeKeyAndVisible
         sWindow.hidden = NO;
-        [sWindow makeKeyAndVisible];
-    });
+
+        NSLog(@"[ClassDumpSearch] overlay shown");
+    } @catch (NSException *e) {
+        NSLog(@"[ClassDumpSearch] show exception: %@", e);
+        sWindow = nil;
+        sField = nil;
+        sResult = nil;
+        sPanel = nil;
+    }
 }
 
 + (void)hide {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        sWindow.hidden = YES;
-    });
-}
-
-+ (void)onSearch {
-    NSString *kw = [sField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
-    if (kw.length == 0) {
-        sResult.text = @"请输入关键词。";
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self hide]; });
         return;
     }
-    sResult.text = @"扫描中，请稍候…";
-    [sField resignFirstResponder];
+    @try {
+        [sField resignFirstResponder];
+        sWindow.hidden = YES;
+        // 彻底释放，避免挂死后台 Scene
+        sWindow.rootViewController = nil;
+        sWindow = nil;
+        sField = nil;
+        sResult = nil;
+        sPanel = nil;
+        sSearching = NO;
+    } @catch (__unused NSException *e) {
+        sWindow = nil;
+    }
+}
 
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSString *report = [ClassDumpSearch generateReportAndCopyToPasteboard:kw maxResults:300];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            sResult.text = [report stringByAppendingString:@"\n\n（已复制到剪贴板）"];
-        });
-    });
++ (void)onPan:(UIPanGestureRecognizer *)pan {
+    @try {
+        CGPoint t = [pan translationInView:sPanel.superview];
+        if (pan.state == UIGestureRecognizerStateChanged) {
+            sPanel.center = CGPointMake(sPanel.center.x + t.x, sPanel.center.y + t.y);
+            [pan setTranslation:CGPointZero inView:sPanel.superview];
+        }
+    } @catch (__unused NSException *e) {}
 }
 
 + (void)onClose {
     [self hide];
+}
+
++ (void)onSearch {
+    if (sSearching) return;
+
+    @try {
+        NSString *kw = sField.text ?: @"";
+        kw = [kw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (kw.length == 0) {
+            sResult.text = @"请输入关键词。";
+            return;
+        }
+
+        sSearching = YES;
+        sResult.text = @"扫描中（仅 App 自身类）…";
+        [sField resignFirstResponder];
+
+        NSString *keyword = [kw copy];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            NSString *report = nil;
+            @try {
+                report = [ClassDumpSearch searchAndFormatReport:keyword
+                                                     maxResults:200
+                                                  copyClipboard:YES];
+            } @catch (NSException *e) {
+                report = [NSString stringWithFormat:@"搜索异常：%@", e.reason ?: @"unknown"];
+            }
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                sSearching = NO;
+                @try {
+                    if (sResult) {
+                        sResult.text = [(report ?: @"无结果") stringByAppendingString:@"\n\n（已尝试复制到剪贴板）"];
+                    }
+                } @catch (__unused NSException *e) {}
+            });
+        });
+    } @catch (NSException *e) {
+        sSearching = NO;
+        sResult.text = [NSString stringWithFormat:@"UI 异常：%@", e.reason ?: @""];
+    }
 }
 
 @end

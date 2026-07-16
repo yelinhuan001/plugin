@@ -310,68 +310,80 @@
 }
 
 - (void)buildBallWindow {
-    CGFloat size = 56;
-    CGRect screen = UIScreen.mainScreen.bounds;
-    CGRect frame = CGRectMake(screen.size.width - size - 12,
-                              screen.size.height * 0.55,
-                              size, size);
+    @try {
+        if (![UIApplication sharedApplication]) return;
 
-    UIWindow *win = nil;
-    if (@available(iOS 13.0, *)) {
-        UIWindowScene *scene = [self activeScene];
-        if (scene) {
-            win = [[UIWindow alloc] initWithWindowScene:scene];
+        CGFloat size = 56;
+        CGRect screen = UIScreen.mainScreen.bounds;
+        if (CGRectIsEmpty(screen) || screen.size.width < 1) return;
+
+        CGRect frame = CGRectMake(screen.size.width - size - 12,
+                                  screen.size.height * 0.55,
+                                  size, size);
+
+        UIWindow *win = nil;
+        if (@available(iOS 13.0, *)) {
+            UIWindowScene *scene = [self activeScene];
+            if (scene) {
+                win = [[UIWindow alloc] initWithWindowScene:scene];
+            }
         }
+        if (!win) {
+            win = [[UIWindow alloc] initWithFrame:frame];
+        } else {
+            win.frame = frame;
+        }
+
+        win.windowLevel = UIWindowLevelStatusBar + 120;
+        win.backgroundColor = UIColor.clearColor;
+        win.clipsToBounds = NO;
+        // 只 hidden=NO，绝不 makeKeyAndVisible
+        win.hidden = NO;
+        win.userInteractionEnabled = YES;
+
+        UIViewController *root = [UIViewController new];
+        root.view.backgroundColor = UIColor.clearColor;
+        win.rootViewController = root;
+
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+        btn.frame = CGRectMake(0, 0, size, size);
+        btn.layer.cornerRadius = size / 2;
+        btn.backgroundColor = [UIColor colorWithRed:0.15 green:0.55 blue:1 alpha:0.92];
+        btn.layer.shadowColor = UIColor.blackColor.CGColor;
+        btn.layer.shadowOpacity = 0.35;
+        btn.layer.shadowRadius = 6;
+        btn.layer.shadowOffset = CGSizeMake(0, 3);
+        [btn setTitle:@"魔" forState:UIControlStateNormal];
+        [btn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        btn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
+        [btn addTarget:self action:@selector(ballTapped) forControlEvents:UIControlEventTouchUpInside];
+
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(ballPanned:)];
+        [btn addGestureRecognizer:pan];
+
+        [root.view addSubview:btn];
+        self.ballButton = btn;
+        self.ballWindow = win;
+    } @catch (NSException *e) {
+        NSLog(@"[TrollDylibPlugin] buildBallWindow exception: %@", e);
+        self.ballWindow = nil;
     }
-    if (!win) {
-        win = [[UIWindow alloc] initWithFrame:frame];
-    } else {
-        win.frame = frame;
-    }
-
-    win.windowLevel = UIWindowLevelStatusBar + 120;
-    win.backgroundColor = UIColor.clearColor;
-    win.clipsToBounds = NO;
-    win.hidden = NO;
-
-    UIViewController *root = [UIViewController new];
-    root.view.backgroundColor = UIColor.clearColor;
-    win.rootViewController = root;
-
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-    btn.frame = CGRectMake(0, 0, size, size);
-    btn.layer.cornerRadius = size / 2;
-    btn.backgroundColor = [UIColor colorWithRed:0.15 green:0.55 blue:1 alpha:0.92];
-    btn.layer.shadowColor = UIColor.blackColor.CGColor;
-    btn.layer.shadowOpacity = 0.35;
-    btn.layer.shadowRadius = 6;
-    btn.layer.shadowOffset = CGSizeMake(0, 3);
-    [btn setTitle:@"魔" forState:UIControlStateNormal];
-    [btn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
-    [btn addTarget:self action:@selector(ballTapped) forControlEvents:UIControlEventTouchUpInside];
-
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(ballPanned:)];
-    [btn addGestureRecognizer:pan];
-
-    [root.view addSubview:btn];
-    self.ballButton = btn;
-    self.ballWindow = win;
 }
 
 - (void)setVisible:(BOOL)visible {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.ballWindow.hidden = !visible;
-        if (visible) {
-            self.ballWindow.windowLevel = UIWindowLevelStatusBar + 120;
-            [self.ballWindow makeKeyAndVisible];
-            // 立刻还键，避免抢 App 输入
-            UIWindow *appKey = nil;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            appKey = UIApplication.sharedApplication.keyWindow;
-#pragma clang diagnostic pop
-            if (appKey && appKey != self.ballWindow) [appKey makeKeyWindow];
+        @try {
+            if (!self.ballWindow) {
+                if (visible) [self buildBallWindow];
+            }
+            self.ballWindow.hidden = !visible;
+            if (visible && self.ballWindow) {
+                // 禁止 makeKeyAndVisible：多 App 会因此闪退
+                self.ballWindow.windowLevel = UIWindowLevelStatusBar + 120;
+                self.ballWindow.hidden = NO;
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[TrollDylibPlugin] setVisible exception: %@", e);
         }
     });
 }
@@ -453,8 +465,8 @@
         [root.view addGestureRecognizer:tap];
 
         win.rootViewController = root;
+        // 禁止 makeKeyAndVisible，防止抢焦点闪退
         win.hidden = NO;
-        [win makeKeyAndVisible];
         self.panelWindow = win;
     });
 }
@@ -468,18 +480,15 @@
 
 - (void)hidePanel {
     dispatch_async(dispatch_get_main_queue(), ^{
-        self.panelWindow.hidden = YES;
-        self.panelWindow.rootViewController = nil;
-        self.panelWindow = nil;
-        if (TDPConfig.shared.showFloatingBall) {
-            [self.ballWindow makeKeyAndVisible];
-            UIWindow *appKey = nil;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            appKey = UIApplication.sharedApplication.keyWindow;
-#pragma clang diagnostic pop
-            // 不长期占 keyWindow
-            (void)appKey;
+        @try {
+            self.panelWindow.hidden = YES;
+            self.panelWindow.rootViewController = nil;
+            self.panelWindow = nil;
+            if (TDPConfig.shared.showFloatingBall && self.ballWindow) {
+                self.ballWindow.hidden = NO;
+            }
+        } @catch (__unused NSException *e) {
+            self.panelWindow = nil;
         }
     });
 }

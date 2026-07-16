@@ -1,5 +1,5 @@
 // CDSOverlay.h
-// 顶层悬浮搜索面板（手动唤起，不自动改会员）
+// 悬浮面板：不抢 keyWindow、不自动弹出（由 TweakEntry 安全触发）
 
 #import <Foundation/Foundation.h>
 
@@ -7,11 +7,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface CDSOverlay : NSObject
 
-/// 显示搜索面板
 + (void)show;
-
-/// 隐藏搜索面板
 + (void)hide;
++ (BOOL)isVisible;
 
 @end
 
