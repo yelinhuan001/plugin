@@ -11,31 +11,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Xcode
-        run: |
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true
-          echo "SDK路径:"
-          xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "xcrun失败"
-
-      - name: Build .dylib
+      - name: Find SDK & Compile
         run: |
           set -e
-          mkdir -p packages
-          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || \
-                     find /Applications -name "iPhoneOS.sdk" -type d -maxdepth 6 2>/dev/null | head -1)
-          if [ -z "$SDK_PATH" ]; then
-            echo "❌ SDK未找到"
+          echo "=== Xcode ==="
+          ls /Applications/ | grep -i xcode || echo "No Xcode in /Applications"
+          xcodebuild -version 2>/dev/null || echo "xcodebuild not available"
+          SDK=""
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null) && echo "方式1 OK" || echo "方式1 失败"
+          if [ -z "$SDK" ]; then
+            SDK=$(find /Applications -name "iPhoneOS.sdk" -type d 2>/dev/null | head -1) && echo "方式2 OK" || echo "方式2 失败"
+          fi
+          if [ -z "$SDK" ]; then
+            SDK=$(find /Library/Developer -name "iPhoneOS.sdk" -type d 2>/dev/null | head -1) && echo "方式3 OK" || echo "方式3 失败"
+          fi
+          if [ -z "$SDK" ]; then
+            echo "❌ 所有方式都无法找到 iOS SDK"
             exit 1
           fi
-          echo "✅ SDK: $SDK_PATH"
+          echo "✅ 找到 SDK: $SDK"
+          mkdir -p packages
           clang -shared \
             -fobjc-arc -I. \
-            -isysroot "$SDK_PATH" \
+            -isysroot "$SDK" \
             -arch arm64 \
             -miphoneos-version-min=14.0 \
             -lobjc -framework UIKit -framework Foundation \
             ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m \
-            -o packages/ClassDumpDylib.dylib
+            -o packages/ClassDumpDylib.dylib 2>&1
           echo "✅ 编译完成"
           ls -lh packages/
 
