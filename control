@@ -1,9 +1,8 @@
-Package: com.reasonix.classdumptweak
-Name: ClassDumpTweak
-Depends: mobilesubstrate (>= 0.9.5000)
+Package: com.reasonix.classdumpdylib
+Name: ClassDumpDylib
 Version: 1.0.0
 Architecture: iphoneos-arm
-Description: Runtime class dump & search tool — search classes, methods, properties by keyword
+Description: Runtime class dump dylib — search classes/methods/properties by keyword, copy report to clipboard
 Maintainer: reasonix
 Author: reasonix
-Section: Tweaks
+Section: Development
