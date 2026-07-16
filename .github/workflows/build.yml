@@ -24,10 +24,10 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || \
                      find /Applications -name "iPhoneOS.sdk" -type d -maxdepth 6 2>/dev/null | head -1)
           if [ -z "$SDK_PATH" ]; then
-            echo "❌ 未找到 iOS SDK"
+            echo "❌ SDK未找到"
             exit 1
           fi
-          echo "✅ 使用SDK: $SDK_PATH"
+          echo "✅ SDK: $SDK_PATH"
           clang -shared \
             -fobjc-arc -I. \
             -isysroot "$SDK_PATH" \
