@@ -14,36 +14,45 @@
 
 - (void)cd_handleOverlayGesture:(UILongPressGestureRecognizer *)gesture {
     if (gesture.state != UIGestureRecognizerStateBegan) return;
-    NSLog(@"[ClassDump] 三指长按触发 → 显示搜索面板");
+    NSLog(@"[ClassDump] 双指长按触发 → 显示搜索面板");
     [SearchOverlayWindow show];
 }
 
 - (void)cd_ensureGestureInstalled {
-    UIWindow *keyWin = self.keyWindow;
+    // iOS 13+ 用 scene 找 window，避免 keyWindow 返回 nil
+    UIWindow *keyWin = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)s;
+                for (UIWindow *w in ws.windows) {
+                    if (w.isKeyWindow) { keyWin = w; break; }
+                }
+                if (keyWin) break;
+            }
+        }
+    } else {
+        keyWin = [UIApplication sharedApplication].keyWindow;
+    }
     if (!keyWin) {
-        // keyWindow 还没准备好，延迟重试
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             [self cd_ensureGestureInstalled];
         });
         return;
     }
-
-    // 避免重复安装
     NSNumber *installed = objc_getAssociatedObject(keyWin, "_cd_gesture_ok");
     if (installed.boolValue) return;
-
     UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc]
                                              initWithTarget:self
                                              action:@selector(cd_handleOverlayGesture:)];
-    gesture.numberOfTouchesRequired = 3;
-    gesture.minimumPressDuration = 0.8;
+    gesture.numberOfTouchesRequired = 2;
+    gesture.minimumPressDuration = 0.6;
     gesture.allowableMovement = 50;
-
     [keyWin addGestureRecognizer:gesture];
     objc_setAssociatedObject(keyWin, "_cd_gesture_ok", @YES,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NSLog(@"[ClassDump] ✅ 三指长按手势已安装到 keyWindow");
+    NSLog(@"[ClassDump] ✅ 双指长按手势已安装");
 }
 
 @end
@@ -58,7 +67,7 @@ static void swizzled_sendEvent(id self, SEL _cmd, UIEvent *event) {
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSLog(@"[ClassDump] 首个 UIEvent 触发 → 安装三指长按手势");
+        NSLog(@"[ClassDump] 首个 UIEvent 触发 → 安装双指长按手势");
         [[UIApplication sharedApplication] cd_ensureGestureInstalled];
     });
 }
@@ -80,7 +89,7 @@ static void swizzled_makeKeyAndVisible(id self, SEL _cmd) {
 
 __attribute__((constructor))
 static void ClassDylibInit() {
-    NSLog(@"[ClassDump] 🔧 dylib 已加载 — iOS 14+, 三指长按 0.8s 呼出搜索面板");
+    NSLog(@"[ClassDump] 🔧 dylib 已加载 — 双指长按 0.6s 呼出搜索面板");
 
     dispatch_async(dispatch_get_main_queue(), ^{
         // ── Method Swizzle: UIApplication.sendEvent: ──

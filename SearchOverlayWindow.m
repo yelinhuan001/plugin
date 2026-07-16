@@ -251,6 +251,7 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     [view addSubview:tf];
     self.searchField = tf;
 
+    // 搜索按钮
     UIButton *searchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     searchBtn.frame = CGRectMake(w - 74, 8, 62, 34);
     [searchBtn setTitle:@"搜索" forState:UIControlStateNormal];
@@ -262,6 +263,27 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     [view addSubview:searchBtn];
     self.searchButton = searchBtn;
 
+    // 操作按钮行
+    UIButton *hookBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    hookBtn.frame = CGRectMake(12, 46, 70, 26);
+    [hookBtn setTitle:@"⚡ Hook" forState:UIControlStateNormal];
+    [hookBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    hookBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.3 alpha:1];
+    hookBtn.layer.cornerRadius = 6;
+    hookBtn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
+    [hookBtn addTarget:self action:@selector(hookFromSearchTapped) forControlEvents:UIControlEventTouchUpInside];
+    [view addSubview:hookBtn];
+
+    UIButton *copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    copyBtn.frame = CGRectMake(88, 46, 70, 26);
+    [copyBtn setTitle:@"📋 复制" forState:UIControlStateNormal];
+    [copyBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    copyBtn.backgroundColor = [UIColor colorWithWhite:0.3 alpha:1];
+    copyBtn.layer.cornerRadius = 6;
+    copyBtn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
+    [copyBtn addTarget:self action:@selector(copySearchResultTapped) forControlEvents:UIControlEventTouchUpInside];
+    [view addSubview:copyBtn];
+
     // spinner
     UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     spinner.center = CGPointMake(w/2, h/2);
@@ -270,7 +292,7 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     self.spinner = spinner;
 
     // 结果
-    UITextView *tv = [[UITextView alloc] initWithFrame:CGRectMake(6, 48, w-12, h-54)];
+    UITextView *tv = [[UITextView alloc] initWithFrame:CGRectMake(6, 76, w-12, h-82)];
     tv.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
     tv.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
     tv.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
@@ -309,6 +331,62 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     });
 }
 
+#pragma mark - 搜索面板操作
+
+- (void)hookFromSearchTapped {
+    NSString *keyword = self.searchField.text;
+    if (keyword.length == 0) {
+        [self showToast:@"⚠️ 先输入关键词搜索"];
+        return;
+    }
+    // 用关键词预填 Hook 对话框
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚡ Hook 方法"
+                                                                   message:@"输入要 Hook 的类名和方法名"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"类名";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"方法名（含关键词）";
+        tf.text = keyword;
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Hook → YES" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        NSString *cls = alert.textFields[0].text;
+        NSString *sel = alert.textFields[1].text;
+        if (cls.length && sel.length) {
+            BOOL ok = [MethodHacker hookMethodWithClass:cls methodName:sel isClassMethod:NO returnType:@"BOOL" value:@YES];
+            [self showToast:ok ? @"✅ Hook 成功" : @"❌ 失败，检查类名/方法名"];
+            [self refreshHooksList];
+        }
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Hook → NO" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        NSString *cls = alert.textFields[0].text;
+        NSString *sel = alert.textFields[1].text;
+        if (cls.length && sel.length) {
+            BOOL ok = [MethodHacker hookMethodWithClass:cls methodName:sel isClassMethod:NO returnType:@"BOOL" value:@NO];
+            [self showToast:ok ? @"✅ Hook 成功" : @"❌ 失败"];
+            [self refreshHooksList];
+        }
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+
+    UIViewController *vc = [self viewControllerForPresent];
+    if (vc) {
+        [vc presentViewController:alert animated:YES completion:nil];
+    } else {
+        [self showToast:@"❌ 无法显示对话框"];
+    }
+}
+
+- (void)copySearchResultTapped {
+    if (self.resultView.text.length > 0) {
+        [UIPasteboard generalPasteboard].string = self.resultView.text;
+        [self showToast:@"✅ 已复制"];
+    }
+}
+
 #pragma mark - Hooks 面板
 
 - (void)buildHooksPanel {
@@ -319,25 +397,59 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 
     // 添加 Hook 按钮
     UIButton *addBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    addBtn.frame = CGRectMake(12, 8, w - 24, 36);
-    [addBtn setTitle:@"➕ 添加 Hook" forState:UIControlStateNormal];
+    addBtn.frame = CGRectMake(12, 4, w - 24, 32);
+    [addBtn setTitle:@"➕ 自定义 Hook" forState:UIControlStateNormal];
     [addBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     addBtn.backgroundColor = [UIColor colorWithRed:0.6 green:0.2 blue:0.2 alpha:1];
     addBtn.layer.cornerRadius = 8;
-    addBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    addBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [addBtn addTarget:self action:@selector(addHookTapped) forControlEvents:UIControlEventTouchUpInside];
     [view addSubview:addBtn];
     self.addHookButton = addBtn;
 
+    // 快速 Hook 模板
+    CGFloat btnY = 40;
+    CGFloat btnW = (w - 36) / 3;
+    NSArray *templates = @[
+        @[@"🦸 VIP解锁", @"VIPManager", @"isVIPMember"],
+        @[@"🦸 VIP解锁", @"UserInfo", @"isVIP"],
+        @[@"🦸 VIP解锁", @"SettingsManager", @"isPremium"],
+        @[@"🚫 去广告", @"AdManager", @"shouldShowAd"],
+        @[@"🚫 去广告", @"ADManager", @"isAd"],
+        @[@"🚫 去广告", @"BannerView", @"canDisplayAd"],
+        @[@"🔓 全解锁", @"PaywallManager", @"isLocked"],
+        @[@"🔓 全解锁", @"FeatureManager", @"hasAccess"],
+    ];
+
+    for (int i = 0; i < (int)templates.count; i++) {
+        NSArray *t = templates[i];
+        int row = i / 3;
+        int col = i % 3;
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+        btn.frame = CGRectMake(12 + col * (btnW + 6), btnY + row * 30, btnW, 26);
+        [btn setTitle:t[0] forState:UIControlStateNormal];
+        [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        btn.backgroundColor = [UIColor colorWithRed:0.25 green:0.35 blue:0.55 alpha:1];
+        btn.layer.cornerRadius = 6;
+        btn.titleLabel.font = [UIFont systemFontOfSize:10];
+        // 关联参数
+        objc_setAssociatedObject(btn, "_hook_cls", t[1], OBJC_ASSOCIATION_RETAIN);
+        objc_setAssociatedObject(btn, "_hook_sel", t[2], OBJC_ASSOCIATION_RETAIN);
+        [btn addTarget:self action:@selector(quickHookTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [view addSubview:btn];
+    }
+
     // 提示
-    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(12, 48, w-24, 20)];
-    tip.text = @"活跃的 Hook（左滑删除）";
+    CGFloat tipY = btnY + ((templates.count + 2) / 3) * 30 + 4;
+    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(12, tipY, w-24, 18)];
+    tip.text = @"活跃的 Hook（左滑取消）";
     tip.textColor = [UIColor lightGrayColor];
-    tip.font = [UIFont systemFontOfSize:12];
+    tip.font = [UIFont systemFontOfSize:11];
     [view addSubview:tip];
 
     // 列表
-    UITableView *table = [[UITableView alloc] initWithFrame:CGRectMake(0, 68, w, h-68) style:UITableViewStylePlain];
+    CGFloat tableY = tipY + 20;
+    UITableView *table = [[UITableView alloc] initWithFrame:CGRectMake(0, tableY, w, h-tableY) style:UITableViewStylePlain];
     table.backgroundColor = [UIColor clearColor];
     table.dataSource = self;
     table.delegate = self;
@@ -347,6 +459,27 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     self.hooksTable = table;
 
     [self.contentArea addSubview:view];
+}
+
+- (void)quickHookTapped:(UIButton *)sender {
+    NSString *cls = objc_getAssociatedObject(sender, "_hook_cls");
+    NSString *sel = objc_getAssociatedObject(sender, "_hook_sel");
+    if (!cls || !sel) return;
+
+    // 判断应该返回 YES 还是 NO
+    BOOL returnYES = YES;
+    NSArray *noKeywords = @[@"Ad", @"ad", @"Locked", @"locked", @"Banner", @"banner"];
+    for (NSString *kw in noKeywords) {
+        if ([sel containsString:kw]) { returnYES = NO; break; }
+    }
+
+    BOOL ok = [MethodHacker hookMethodWithClass:cls methodName:sel isClassMethod:NO returnType:@"BOOL" value:@(returnYES)];
+    if (ok) {
+        [self showToast:[NSString stringWithFormat:@"✅ %@.%@ → %@", cls, sel, returnYES ? @"YES" : @"NO"]];
+        [self refreshHooksList];
+    } else {
+        [self showToast:[NSString stringWithFormat:@"❌ %@.%@ 未找到", cls, sel]];
+    }
 }
 
 - (void)refreshHooksList {
@@ -647,6 +780,21 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 }
 
 - (UIViewController *)viewControllerForPresent {
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)s;
+                for (UIWindow *w in ws.windows) {
+                    UIViewController *root = w.rootViewController;
+                    if (root) {
+                        while (root.presentedViewController) root = root.presentedViewController;
+                        return root;
+                    }
+                }
+            }
+        }
+    }
+    // 退回到 keyWindow
     UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
     while (root.presentedViewController) {
         root = root.presentedViewController;
