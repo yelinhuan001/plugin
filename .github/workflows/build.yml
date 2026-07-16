@@ -31,10 +31,11 @@ jobs:
               -o ClassDumpSearch_iOS.dylib
           fi
 
-      # 2. 上传编译好的最新 dylib
+      # 2. 上传编译好的最新 dylib（这里已经修改，会去 packages 文件夹里找文件）
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: compiled-dylibs
           path: |
+            packages/*.dylib
             *.dylib
