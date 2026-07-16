@@ -1,37 +1,39 @@
-name: Build ClassDumpDylib
+name: Build Dylib
+
 on:
   push:
+    branches: [ main, master ]
+  pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Build
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1. 优先尝试使用您的 Makefile 自动编译今天的所有新代码
+      - name: Build with Makefile
         run: |
-          echo "=== Xcode路径 ==="
-          ls /Applications/ | grep -i xcode || echo "未找到Xcode"
-          echo "=== 选择Xcode ==="
-          XCODE=""
-          for p in /Applications/Xcode*.app; do [ -d "$p" ] && XCODE="$p" && break; done
-          echo "使用: $XCODE"
-          [ -n "$XCODE" ] && sudo xcode-select -s "$XCODE/Contents/Developer" 2>/dev/null
-          echo "=== SDK ==="
-          /usr/bin/xcrun --sdk iphoneos --show-sdk-path 2>&1 || echo "xcrun失败"
-          echo "=== 编译 ==="
-          mkdir -p packages
-          clang -shared -fobjc-arc -I. \
-            -isysroot "$(/usr/bin/xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)" \
-            -arch arm64 -miphoneos-version-min=14.0 \
-            -lobjc -framework UIKit -framework Foundation \
-            ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m \
-            -o packages/ClassDumpDylib.dylib 2>&1
-          echo "=== 结果 ==="
-          ls -lh packages/ 2>/dev/null || echo "编译失败"
-      - name: Upload
+          if [ -f Makefile.standalone ]; then
+            echo "发现 Makefile.standalone，开始编译..."
+            make -f Makefile.standalone
+          elif [ -f Makefile ]; then
+            echo "发现 Makefile，开始编译..."
+            make
+          else
+            echo "未发现 Makefile，执行备用编译命令..."
+            clang -dynamiclib -framework Foundation -framework UIKit \
+              CDSOverlay.m ClassDumpSearch.m TweakEntry.m \
+              -o ClassDumpSearch_iOS.dylib
+          fi
+      # 2. 上传编译好的最新 dylib
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ClassDumpDylib
-          path: packages/ClassDumpDylib.dylib
+          name: compiled-dylibs
+          path: |
+            *.dylib
