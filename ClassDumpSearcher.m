@@ -1,4 +1,5 @@
 #import "ClassDumpSearcher.h"
+#import <UIKit/UIPasteboard.h>
 
 #pragma mark - SearchMatch
 
@@ -32,9 +33,6 @@
 
         NSString *className = NSStringFromClass(cls);
         if (!className) continue;
-
-        // 跳过系统私有前缀以减少噪音（可选）
-        // if ([className hasPrefix:@"_"] || [className hasPrefix:@"__"]) continue;
 
         BOOL classMatched = NO;
 
@@ -89,7 +87,6 @@
         for (unsigned int j = 0; j < propertyCount; j++) {
             NSString *propName = [NSString stringWithUTF8String:property_getName(properties[j])];
             if (propName && [[propName lowercaseString] containsString:lowerKeyword]) {
-                // 避免与类名匹配重复记录
                 if (!classMatched) {
                     SearchMatch *match = [[SearchMatch alloc] init];
                     match.className = className;
@@ -122,7 +119,6 @@
 
     [report appendFormat:@"找到 %lu 个相关结果：\n\n", (unsigned long)results.count];
 
-    // 按类名分组展示
     NSMutableDictionary<NSString *, NSMutableArray<SearchMatch *> *> *grouped = [NSMutableDictionary dictionary];
     for (SearchMatch *match in results) {
         if (!grouped[match.className]) {
