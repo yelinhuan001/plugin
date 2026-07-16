@@ -11,17 +11,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true
+          echo "SDK路径:"
+          xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "xcrun失败"
+
       - name: Build .dylib
         run: |
+          set -e
           mkdir -p packages
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || \
+                     find /Applications -name "iPhoneOS.sdk" -type d -maxdepth 6 2>/dev/null | head -1)
+          if [ -z "$SDK_PATH" ]; then
+            echo "❌ 未找到 iOS SDK"
+            exit 1
+          fi
+          echo "✅ 使用SDK: $SDK_PATH"
           clang -shared \
             -fobjc-arc -I. \
-            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
-            -arch arm64 -arch arm64e \
+            -isysroot "$SDK_PATH" \
+            -arch arm64 \
             -miphoneos-version-min=14.0 \
             -lobjc -framework UIKit -framework Foundation \
             ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m \
             -o packages/ClassDumpDylib.dylib
+          echo "✅ 编译完成"
+          ls -lh packages/
 
       - name: Upload .dylib
         uses: actions/upload-artifact@v4
