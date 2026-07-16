@@ -25,7 +25,6 @@ static SearchOverlayWindow *_sharedOverlay = nil;
         return;
     }
 
-    // 在 iOS 13+ 上需要获取活跃的 UIWindowScene
     UIWindowScene *scene = nil;
     if (@available(iOS 13.0, *)) {
         for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
@@ -34,7 +33,6 @@ static SearchOverlayWindow *_sharedOverlay = nil;
                 break;
             }
         }
-        // 如果没有前台活跃场景，取第一个
         if (!scene) {
             for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
                 if ([s isKindOfClass:[UIWindowScene class]]) {
@@ -55,18 +53,11 @@ static SearchOverlayWindow *_sharedOverlay = nil;
             win = [[SearchOverlayWindow alloc] initWithFrame:screenBounds];
         }
     } else {
-        // iOS 12 及以下
         win = [[SearchOverlayWindow alloc] initWithFrame:screenBounds];
     }
 
-    // iOS 14+ 使用 alertWindowLevel，低版本兼容
-    if (@available(iOS 14.0, *)) {
-        win.windowLevel = UIWindow.alertWindowLevel + 100;
-    } else if (@available(iOS 13.0, *)) {
-        win.windowLevel = UIWindowLevelAlert + 100;
-    } else {
-        win.windowLevel = UIWindowLevelAlert + 100;
-    }
+    // 窗口层级设到最高，确保覆盖所有界面
+    win.windowLevel = 2100.0;
     win.backgroundColor = [UIColor clearColor];
     [win setupUI];
 
@@ -90,14 +81,14 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     CGFloat originX = ([UIScreen mainScreen].bounds.size.width - panelW) / 2;
     CGFloat originY = 60;
 
-    // ── 背景遮罩（点击空区域可关闭） ──
+    // 背景遮罩
     UIButton *bgDismiss = [UIButton buttonWithType:UIButtonTypeCustom];
     bgDismiss.frame = self.bounds;
     bgDismiss.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.35];
     [bgDismiss addTarget:self action:@selector(dismissTapped) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:bgDismiss];
 
-    // ── 面板容器 ──
+    // 面板容器
     UIView *panel = [[UIView alloc] initWithFrame:CGRectMake(originX, originY, panelW, panelH)];
     panel.tag = 9999;
     panel.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.95];
@@ -108,14 +99,14 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     [self addSubview:panel];
     self.panelView = panel;
 
-    // ── 标题栏 ──
+    // 标题
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 12, panelW - 80, 24)];
     titleLabel.text = @"🔍 Runtime Class Dump";
     titleLabel.textColor = [UIColor whiteColor];
     titleLabel.font = [UIFont boldSystemFontOfSize:17];
     [panel addSubview:titleLabel];
 
-    // ── 关闭按钮 ──
+    // 关闭按钮
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
     closeBtn.frame = CGRectMake(panelW - 40, 8, 32, 32);
     [closeBtn setTitle:@"✕" forState:UIControlStateNormal];
@@ -125,7 +116,7 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     [panel addSubview:closeBtn];
     self.closeButton = closeBtn;
 
-    // ── 搜索输入框 ──
+    // 搜索输入框
     CGFloat y = 50;
     UITextField *textField = [[UITextField alloc] initWithFrame:CGRectMake(16, y, panelW - 100, 36)];
     textField.placeholder = @"输入关键词（如 vip, token）";
@@ -139,11 +130,11 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     textField.autocorrectionType = UITextAutocorrectionTypeNo;
     textField.returnKeyType = UIReturnKeySearch;
     textField.font = [UIFont systemFontOfSize:15];
-    textField.delegate = (id<UITextFieldDelegate>)self;
+    textField.delegate = self;
     [panel addSubview:textField];
     self.searchField = textField;
 
-    // ── 搜索按钮 ──
+    // 搜索按钮
     UIButton *searchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     searchBtn.frame = CGRectMake(panelW - 76, y, 60, 36);
     [searchBtn setTitle:@"搜索" forState:UIControlStateNormal];
@@ -155,19 +146,19 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     [panel addSubview:searchBtn];
     self.searchButton = searchBtn;
 
-    // ── 加载指示器 ──
-    UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
+    // 加载指示器
+    UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     spinner.center = CGPointMake(panelW / 2, panelH / 2);
     spinner.hidesWhenStopped = YES;
     [panel addSubview:spinner];
     self.spinner = spinner;
 
-    // ── 结果显示区域 ──
+    // 结果显示区域
     CGFloat resultY = y + 48;
     CGFloat resultH = panelH - resultY - 16;
     UITextView *resultView = [[UITextView alloc] initWithFrame:CGRectMake(8, resultY, panelW - 16, resultH)];
     resultView.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
-    resultView.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1]; // 终端绿色风格
+    resultView.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
     resultView.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont systemFontOfSize:12];
     resultView.editable = NO;
     resultView.layer.cornerRadius = 8;
@@ -175,7 +166,6 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     [panel addSubview:resultView];
     self.resultView = resultView;
 
-    // 提示文本
     self.resultView.text = @"输入关键词后点击搜索，或按回车键。\n\n"
                            "提示：搜索结果会自动复制到剪贴板。\n"
                            "支持的 API 版本: iOS 14+";
@@ -195,18 +185,14 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     [self.spinner startAnimating];
     self.searchButton.enabled = NO;
 
-    // 异步搜索，避免卡 UI
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *report = [ClassDumpSearcher searchAndCopyWithKeyword:keyword];
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.spinner stopAnimating];
             self.searchButton.enabled = YES;
             self.resultView.text = report;
-
-            // 滚到顶部
             [self.resultView scrollRangeToVisible:NSMakeRange(0, 0)];
 
-            // 提示已复制
             UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 200, 36)];
             toast.center = CGPointMake(self.panelView.frame.size.width / 2, self.panelView.frame.size.height / 2);
             toast.backgroundColor = [UIColor colorWithWhite:0 alpha:0.8];
