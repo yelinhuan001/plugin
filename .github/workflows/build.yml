@@ -6,43 +6,31 @@ on:
 
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: 诊断环境
+      - uses: actions/checkout@v4
+      - name: Build
         run: |
-          echo "=== 系统信息 ==="
-          uname -a
-          echo "=== Xcode ==="
-          xcode-select -p 2>&1
-          xcrun --show-sdk-path 2>&1 || true
-          xcrun --sdk iphoneos --show-sdk-path 2>&1 || true
-          echo "=== SDK 文件 ==="
-          find /Applications -name "iPhoneOS.sdk" -maxdepth 6 2>/dev/null || true
-          find /Library -name "iPhoneOS.sdk" -maxdepth 6 2>/dev/null || true
-          echo "=== clang ==="
-          clang --version 2>&1 || true
-
-      - name: 编译
-        run: |
-          set -e
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path 2>&1)
-          echo "SDK路径: $SDK"
+          echo "=== Xcode路径 ==="
+          ls /Applications/ | grep -i xcode || echo "未找到Xcode"
+          echo "=== 选择Xcode ==="
+          XCODE=""
+          for p in /Applications/Xcode*.app; do [ -d "$p" ] && XCODE="$p" && break; done
+          echo "使用: $XCODE"
+          [ -n "$XCODE" ] && sudo xcode-select -s "$XCODE/Contents/Developer" 2>/dev/null
+          echo "=== SDK ==="
+          /usr/bin/xcrun --sdk iphoneos --show-sdk-path 2>&1 || echo "xcrun失败"
+          echo "=== 编译 ==="
           mkdir -p packages
-          clang -shared \
-            -fobjc-arc -I. \
-            -isysroot "$SDK" \
-            -arch arm64 \
-            -miphoneos-version-min=14.0 \
+          clang -shared -fobjc-arc -I. \
+            -isysroot "$(/usr/bin/xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)" \
+            -arch arm64 -miphoneos-version-min=14.0 \
             -lobjc -framework UIKit -framework Foundation \
             ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m \
-            -o packages/ClassDumpDylib.dylib
-          echo "✅ 编译成功"
-          ls -lh packages/
-
-      - name: 上传
+            -o packages/ClassDumpDylib.dylib 2>&1
+          echo "=== 结果 ==="
+          ls -lh packages/ 2>/dev/null || echo "编译失败"
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: ClassDumpDylib
