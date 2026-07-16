@@ -28,8 +28,10 @@ typedef NS_ENUM(NSUInteger, OverlayTab) {
 // ── 搜索面板 ──
 @property (nonatomic, strong) UITextField *searchField;
 @property (nonatomic, strong) UIButton *searchButton;
-@property (nonatomic, strong) UITextView *resultView;
+@property (nonatomic, strong) UITableView *resultTable;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
+@property (nonatomic, strong) NSArray<SearchMatch *> *lastResults;
+@property (nonatomic, strong) NSString *lastReport;
 
 // ── Hooks 面板 ──
 @property (nonatomic, strong) UITableView *hooksTable;
@@ -229,163 +231,59 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 #pragma mark - 搜索面板
 
 - (void)buildSearchPanel {
-    CGFloat w = self.contentArea.frame.size.width;
-    CGFloat h = self.contentArea.frame.size.height;
-    UIView *view = [[UIView alloc] initWithFrame:self.contentArea.bounds];
-    view.tag = 1001;
-
+    CGFloat w = self.contentArea.frame.size.width, h = self.contentArea.frame.size.height;
+    UIView *v = [[UIView alloc] initWithFrame:self.contentArea.bounds]; v.tag = 1001;
     // 搜索框
-    UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(12, 8, w - 90, 34)];
-    tf.placeholder = @"关键词（vip, token...）";
-    tf.textColor = [UIColor whiteColor];
-    tf.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1];
-    tf.layer.cornerRadius = 8;
-    tf.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 0)];
-    tf.leftViewMode = UITextFieldViewModeAlways;
-    tf.clearButtonMode = UITextFieldViewModeWhileEditing;
-    tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    tf.autocorrectionType = UITextAutocorrectionTypeNo;
-    tf.returnKeyType = UIReturnKeySearch;
-    tf.font = [UIFont systemFontOfSize:14];
-    tf.delegate = self;
-    [view addSubview:tf];
-    self.searchField = tf;
-
+    UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(12, 8, w-90, 34)];
+    tf.placeholder = @"关键词（vip, token...）"; tf.textColor = [UIColor whiteColor];
+    tf.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1]; tf.layer.cornerRadius = 8;
+    tf.leftView = [[UIView alloc] initWithFrame:CGRectMake(0,0,10,0)]; tf.leftViewMode = UITextFieldViewModeAlways;
+    tf.clearButtonMode = UITextFieldViewModeWhileEditing; tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    tf.autocorrectionType = UITextAutocorrectionTypeNo; tf.returnKeyType = UIReturnKeySearch;
+    tf.font = [UIFont systemFontOfSize:14]; tf.delegate = self; [v addSubview:tf]; self.searchField = tf;
     // 搜索按钮
-    UIButton *searchBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    searchBtn.frame = CGRectMake(w - 74, 8, 62, 34);
-    [searchBtn setTitle:@"搜索" forState:UIControlStateNormal];
-    [searchBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    searchBtn.backgroundColor = [UIColor systemBlueColor];
-    searchBtn.layer.cornerRadius = 8;
-    searchBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-    [searchBtn addTarget:self action:@selector(searchTapped) forControlEvents:UIControlEventTouchUpInside];
-    [view addSubview:searchBtn];
-    self.searchButton = searchBtn;
-
-    // 操作按钮行
-    UIButton *hookBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    hookBtn.frame = CGRectMake(12, 46, 70, 26);
-    [hookBtn setTitle:@"⚡ Hook" forState:UIControlStateNormal];
-    [hookBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    hookBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.3 alpha:1];
-    hookBtn.layer.cornerRadius = 6;
-    hookBtn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
-    [hookBtn addTarget:self action:@selector(hookFromSearchTapped) forControlEvents:UIControlEventTouchUpInside];
-    [view addSubview:hookBtn];
-
-    UIButton *copyBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    copyBtn.frame = CGRectMake(88, 46, 70, 26);
-    [copyBtn setTitle:@"📋 复制" forState:UIControlStateNormal];
-    [copyBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    copyBtn.backgroundColor = [UIColor colorWithWhite:0.3 alpha:1];
-    copyBtn.layer.cornerRadius = 6;
-    copyBtn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
-    [copyBtn addTarget:self action:@selector(copySearchResultTapped) forControlEvents:UIControlEventTouchUpInside];
-    [view addSubview:copyBtn];
-
+    UIButton *sb = [UIButton buttonWithType:UIButtonTypeSystem];
+    sb.frame = CGRectMake(w-74, 8, 62, 34); [sb setTitle:@"搜索" forState:UIControlStateNormal];
+    [sb setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    sb.backgroundColor = [UIColor systemBlueColor]; sb.layer.cornerRadius = 8;
+    sb.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [sb addTarget:self action:@selector(searchTapped) forControlEvents:UIControlEventTouchUpInside]; [v addSubview:sb]; self.searchButton = sb;
+    // 提示
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(12, 46, w-24, 20)];
+    hint.text = @"搜索结果（点击 Hook）"; hint.textColor = [UIColor lightGrayColor]; hint.font = [UIFont systemFontOfSize:11];
+    [v addSubview:hint];
     // spinner
-    UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    spinner.center = CGPointMake(w/2, h/2);
-    spinner.hidesWhenStopped = YES;
-    [view addSubview:spinner];
-    self.spinner = spinner;
-
-    // 结果
-    UITextView *tv = [[UITextView alloc] initWithFrame:CGRectMake(6, 76, w-12, h-82)];
-    tv.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
-    tv.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
-    tv.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
-    tv.editable = NO;
-    tv.layer.cornerRadius = 8;
-    tv.contentInset = UIEdgeInsetsMake(8, 8, 8, 8);
-    tv.text = @"输入关键词，点击搜索。\n支持: vip / token / user / pay ...";
-    [view addSubview:tv];
-    self.resultView = tv;
-
-    [self.contentArea addSubview:view];
+    UIActivityIndicatorView *sp = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    sp.center = CGPointMake(w/2, h/2); sp.hidesWhenStopped = YES; [v addSubview:sp]; self.spinner = sp;
+    // 结果列表 — 点击即可 Hook
+    UITableView *table = [[UITableView alloc] initWithFrame:CGRectMake(6, 66, w-12, h-72) style:UITableViewStylePlain];
+    table.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
+    table.layer.cornerRadius = 8; table.dataSource = self; table.delegate = self;
+    table.separatorStyle = UITableViewCellSeparatorStyleNone; table.tag = 4001;
+    [v addSubview:table]; self.resultTable = table;
+    [self.contentArea addSubview:v];
 }
 
 - (void)searchTapped {
     [self.searchField resignFirstResponder];
-    NSString *keyword = self.searchField.text;
-    if (keyword.length == 0) {
-        self.resultView.text = @"⚠️ 请输入关键词";
-        return;
-    }
-
-    self.resultView.text = @"";
-    [self.spinner startAnimating];
-    self.searchButton.enabled = NO;
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *report = [ClassDumpSearcher searchAndCopyWithKeyword:keyword];
+    NSString *kw = self.searchField.text;
+    if (kw.length == 0) { [self showToast:@"⚠️ 请输入关键词"]; return; }
+    [self.spinner startAnimating]; self.searchButton.enabled = NO;
+    dispatch_async(dispatch_get_global_queue(0,0), ^{
+        NSArray *results = [ClassDumpSearcher searchClassesWithKeyword:kw];
+        NSString *report = [ClassDumpSearcher formatReportWithResults:results keyword:kw];
+        [ClassDumpSearcher copyReportToPasteboard:report];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self.spinner stopAnimating];
-            self.searchButton.enabled = YES;
-            self.resultView.text = report;
-            [self.resultView scrollRangeToVisible:NSMakeRange(0, 0)];
-
-            [self showToast:@"✅ 已复制到剪贴板"];
+            [self.spinner stopAnimating]; self.searchButton.enabled = YES;
+            self.lastResults = results;
+            self.lastReport = report;
+            [self.resultTable reloadData];
+            [self showToast:[NSString stringWithFormat:@"✅ 找到 %lu 条结果，已复制", (unsigned long)results.count]];
         });
     });
 }
 
 #pragma mark - 搜索面板操作
-
-- (void)hookFromSearchTapped {
-    NSString *keyword = self.searchField.text;
-    if (keyword.length == 0) {
-        [self showToast:@"⚠️ 先输入关键词搜索"];
-        return;
-    }
-    // 用关键词预填 Hook 对话框
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚡ Hook 方法"
-                                                                   message:@"输入要 Hook 的类名和方法名"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"类名";
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    }];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"方法名（含关键词）";
-        tf.text = keyword;
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Hook → YES" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        NSString *cls = alert.textFields[0].text;
-        NSString *sel = alert.textFields[1].text;
-        if (cls.length && sel.length) {
-            BOOL ok = [MethodHacker hookMethodWithClass:cls methodName:sel isClassMethod:NO returnType:@"BOOL" value:@YES];
-            [self showToast:ok ? @"✅ Hook 成功" : @"❌ 失败，检查类名/方法名"];
-            [self refreshHooksList];
-        }
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Hook → NO" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-        NSString *cls = alert.textFields[0].text;
-        NSString *sel = alert.textFields[1].text;
-        if (cls.length && sel.length) {
-            BOOL ok = [MethodHacker hookMethodWithClass:cls methodName:sel isClassMethod:NO returnType:@"BOOL" value:@NO];
-            [self showToast:ok ? @"✅ Hook 成功" : @"❌ 失败"];
-            [self refreshHooksList];
-        }
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-
-    UIViewController *vc = [self viewControllerForPresent];
-    if (vc) {
-        [vc presentViewController:alert animated:YES completion:nil];
-    } else {
-        [self showToast:@"❌ 无法显示对话框"];
-    }
-}
-
-- (void)copySearchResultTapped {
-    if (self.resultView.text.length > 0) {
-        [UIPasteboard generalPasteboard].string = self.resultView.text;
-        [self showToast:@"✅ 已复制"];
-    }
-}
 
 #pragma mark - Hooks 面板
 
@@ -439,13 +337,23 @@ static SearchOverlayWindow *_sharedOverlay = nil;
         [view addSubview:btn];
     }
 
-    // 提示
+    // 提示 + 导出按钮
     CGFloat tipY = btnY + ((templates.count + 2) / 3) * 30 + 4;
-    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(12, tipY, w-24, 18)];
+    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(12, tipY, w-100, 18)];
     tip.text = @"活跃的 Hook（左滑取消）";
     tip.textColor = [UIColor lightGrayColor];
     tip.font = [UIFont systemFontOfSize:11];
     [view addSubview:tip];
+
+    UIButton *exportBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    exportBtn.frame = CGRectMake(w-82, tipY-2, 72, 22);
+    [exportBtn setTitle:@"📝 导出" forState:UIControlStateNormal];
+    [exportBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    exportBtn.backgroundColor = [UIColor colorWithRed:0.4 green:0.3 blue:0.6 alpha:1];
+    exportBtn.layer.cornerRadius = 5;
+    exportBtn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+    [exportBtn addTarget:self action:@selector(exportTweakTapped) forControlEvents:UIControlEventTouchUpInside];
+    [view addSubview:exportBtn];
 
     // 列表
     CGFloat tableY = tipY + 20;
@@ -639,9 +547,8 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 #pragma mark - UITableView
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (tableView == self.hooksTable) {
-        return MAX(self.hooksList.count, 1);
-    }
+    if (tableView.tag == 4001) return MAX(self.lastResults.count, 1);
+    if (tableView == self.hooksTable) return MAX(self.hooksList.count, 1);
     return MAX(self.defaultsKeys.count, 1);
 }
 
@@ -658,10 +565,22 @@ static SearchOverlayWindow *_sharedOverlay = nil;
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
     }
 
-    if (tableView == self.hooksTable) {
+    if (tableView.tag == 4001) {
+        // 搜索结果
+        if (self.lastResults.count == 0) {
+            cell.textLabel.text = @"输入关键词搜索";
+            cell.detailTextLabel.text = @"搜索结果会显示在这里";
+        } else {
+            SearchMatch *m = self.lastResults[indexPath.row];
+            cell.textLabel.text = [NSString stringWithFormat:@"%@ · %@", m.className, m.matchName];
+            cell.detailTextLabel.text = m.matchType;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+        }
+    } else if (tableView == self.hooksTable) {
         if (self.hooksList.count == 0) {
             cell.textLabel.text = @"暂无活跃 Hook";
-            cell.detailTextLabel.text = @"点击上方按钮添加";
+            cell.detailTextLabel.text = @"切换到 Hook Tab 添加";
         } else {
             ActiveHook *h = self.hooksList[indexPath.row];
             cell.textLabel.text = [NSString stringWithFormat:@"%@.%@", h.className, h.methodName];
@@ -675,18 +594,7 @@ static SearchOverlayWindow *_sharedOverlay = nil;
             NSString *key = self.defaultsKeys[indexPath.row];
             id val = self.defaultsData[key];
             cell.textLabel.text = key;
-            if ([val isKindOfClass:[NSData class]]) {
-                cell.detailTextLabel.text = [NSString stringWithFormat:@"<Data: %lu bytes>", (unsigned long)[(NSData *)val length]];
-            } else {
-                cell.detailTextLabel.text = [NSString stringWithFormat:@"%@", val];
-            }
-        }
-
-        // 左侧指示条
-        if (self.defaultsKeys.count > 0) {
-            UIView *indicator = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 3, 44)];
-            indicator.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:0.3 alpha:1];
-            [cell.contentView addSubview:indicator];
+            cell.detailTextLabel.text = [val isKindOfClass:[NSData class]] ? [NSString stringWithFormat:@"<Data: %lu bytes>", (unsigned long)[(NSData *)val length]] : [NSString stringWithFormat:@"%@", val];
         }
     }
 
@@ -694,6 +602,7 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 }
 
 - (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tableView.tag == 4001) return NO;
     if (tableView == self.hooksTable && self.hooksList.count > 0) return YES;
     if (tableView == self.defaultsTable && self.defaultsKeys.count > 0) return YES;
     return NO;
@@ -701,12 +610,10 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (tableView == self.hooksTable) {
-        ActiveHook *h = self.hooksList[indexPath.row];
-        [MethodHacker unhook:h];
+        [MethodHacker unhook:self.hooksList[indexPath.row]];
         [self refreshHooksList];
     } else if (tableView == self.defaultsTable) {
-        NSString *key = self.defaultsKeys[indexPath.row];
-        [UserDefaultsEditor removeKey:key];
+        [UserDefaultsEditor removeKey:self.defaultsKeys[indexPath.row]];
         [self refreshDefaults];
     }
 }
@@ -717,11 +624,35 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (tableView == self.defaultsTable && self.defaultsKeys.count > 0) {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (tableView.tag == 4001 && self.lastResults.count > 0) {
+        [self showHookDialogForMatch:self.lastResults[indexPath.row]];
+    } else if (tableView == self.defaultsTable && self.defaultsKeys.count > 0) {
         NSString *key = self.defaultsKeys[indexPath.row];
-        id val = self.defaultsData[key];
-        [self showEditDefaultDialog:key currentValue:val];
+        [self showEditDefaultDialog:key currentValue:self.defaultsData[key]];
     }
+}
+
+- (void)showHookDialogForMatch:(SearchMatch *)match {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:match.className
+                                                               message:[NSString stringWithFormat:@"%@ · %@\n选择操作:", match.matchType, match.matchName]
+                                                        preferredStyle:UIAlertControllerStyleActionSheet];
+    [a addAction:[UIAlertAction actionWithTitle:@"🟢 Hook → 返回 YES" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
+        BOOL ok = [MethodHacker hookMethodWithClass:match.className methodName:match.matchName isClassMethod:[match.matchType containsString:@"类方法"] returnType:@"BOOL" value:@YES];
+        [self showToast:ok ? @"✅ Hook 成功！" : @"❌ Hook 失败"];
+        if (ok) [self refreshHooksList];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"🔴 Hook → 返回 NO" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *act) {
+        BOOL ok = [MethodHacker hookMethodWithClass:match.className methodName:match.matchName isClassMethod:[match.matchType containsString:@"类方法"] returnType:@"BOOL" value:@NO];
+        [self showToast:ok ? @"✅ Hook 成功！" : @"❌ Hook 失败"];
+        if (ok) [self refreshHooksList];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"📋 复制方法名" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
+        [UIPasteboard generalPasteboard].string = [NSString stringWithFormat:@"%@.%@", match.className, match.matchName];
+        [self showToast:@"✅ 已复制"];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [[self viewControllerForPresent] presentViewController:a animated:YES completion:nil];
 }
 
 #pragma mark - 编辑 Defaults 值
