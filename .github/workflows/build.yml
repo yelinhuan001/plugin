@@ -32,7 +32,7 @@ jobs:
             -arch arm64 \
             -miphoneos-version-min=14.0 \
             -lobjc -framework UIKit -framework Foundation \
-            ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m \
+            ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m MethodHacker.m UserDefaultsEditor.m \
             -o packages/ClassDumpDylib.dylib 2>&1
           echo "退出码: $?"
 
