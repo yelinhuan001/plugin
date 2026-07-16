@@ -1,43 +1,40 @@
-# 无 Mac：用 GitHub 免费 macOS 云主机自动编译 dylib
-# 编译完成后在 Actions → 对应运行记录 → Artifacts 下载
-name: Build iOS dylib
+name: Build Dylib
 
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch:  # 网页上可点 “Run workflow” 手动编译
   pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Show Xcode / SDK
+      # 1. 优先尝试使用您的 Makefile 自动编译今天的所有新代码
+      - name: Build with Makefile
         run: |
-          xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-path
-          xcrun --sdk iphoneos --show-sdk-version
+          if [ -f Makefile.standalone ]; then
+            echo "发现 Makefile.standalone，开始编译..."
+            make -f Makefile.standalone
+          elif [ -f Makefile ]; then
+            echo "发现 Makefile，开始编译..."
+            make
+          else
+            echo "未发现 Makefile，执行备用编译命令..."
+            clang -dynamiclib -framework Foundation -framework UIKit \
+              CDSOverlay.m ClassDumpSearch.m TweakEntry.m \
+              -o ClassDumpSearch_iOS.dylib
+          fi
 
-      - name: Build dylib
-        run: |
-          chmod +x scripts/build_on_mac.sh || true
-          make -f Makefile.standalone clean || true
-          make -f Makefile.standalone
-          file packages/TrollDylibPlugin.dylib
-          ls -la packages/
-
-      - name: Ad-hoc codesign
-        run: |
-          codesign -s - --force packages/TrollDylibPlugin.dylib || true
-          codesign -dv packages/TrollDylibPlugin.dylib 2>&1 || true
-
-      - name: Upload dylib artifact
+      # 2. 上传编译好的最新 dylib
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TrollDylibPlugin-dylib
-          path: packages/TrollDylibPlugin.dylib
-          if-no-files-found: error
-          retention-days: 30
+          name: compiled-dylibs
+          path: |
+            *.dylib
