@@ -1,29 +1,15 @@
-# Theos 编译（可选）
-TARGET := iphone:clang:14.5:14.0
-ARCHS  := arm64
+export TARGET := iphone:clang:14.0:13.0
+export ARCHS = arm64 arm64e
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = TrollDylibPlugin
-
-TrollDylibPlugin_FILES = \
-	src/TweakStandalone.m \
-	src/TDPConfig.m \
-	src/TDPFloatingBall.m \
-	src/TDPVipEngine.m \
-	src/TDPAdBlocker.m \
-	src/HookHelper.m \
-	src/fishhook.c
-
-TrollDylibPlugin_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-deprecated-declarations
-TrollDylibPlugin_FRAMEWORKS = UIKit Foundation CoreGraphics
-TrollDylibPlugin_LDFLAGS = -Wl,-install_name,@rpath/TrollDylibPlugin.dylib
+TWEAK_NAME = ClassDumpTweak
+ClassDumpTweak_FILES = Tweak.xm ClassDumpSearcher.m SearchOverlayWindow.m
+ClassDumpTweak_CFLAGS = -fobjc-arc -I.
+ClassDumpTweak_LDFLAGS = -lobjc -framework UIKit -framework Foundation
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-after-all::
-	@mkdir -p packages
-	@if [ -f $(THEOS_OBJ_DIR)/$(TWEAK_NAME).dylib ]; then \
-		cp -f $(THEOS_OBJ_DIR)/$(TWEAK_NAME).dylib packages/$(TWEAK_NAME).dylib; \
-		echo "[*] packages/$(TWEAK_NAME).dylib"; \
-	fi
+# 安装后杀掉目标 App（可修改为你希望注入的 App）
+after-install::
+	install.exec "killall -9 SpringBoard" || true
