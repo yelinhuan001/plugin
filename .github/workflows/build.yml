@@ -1,4 +1,4 @@
-name: Build ClassDumpTweak
+name: Build ClassDumpDylib
 on:
   push:
     branches: [ main, master ]
@@ -11,20 +11,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Theos
+      - name: Build .dylib
         run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
-          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+          mkdir -p packages
+          clang -shared \
+            -fobjc-arc -I. \
+            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -arch arm64 -arch arm64e \
+            -miphoneos-version-min=14.0 \
+            -lobjc -framework UIKit -framework Foundation \
+            ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m \
+            -o packages/ClassDumpDylib.dylib
 
-      - name: Build .deb
-        run: |
-          export THEOS=$HOME/theos
-          make clean package
-        env:
-          THEOS: ${{ env.THEOS }}
-
-      - name: Upload .deb
+      - name: Upload .dylib
         uses: actions/upload-artifact@v4
         with:
-          name: ClassDumpTweak-deb
-          path: packages/*.deb
+          name: ClassDumpDylib
+          path: packages/ClassDumpDylib.dylib
