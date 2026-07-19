@@ -1,7 +1,7 @@
 PROJECT = ClassDumpDylib
-FILES   = ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m
+FILES   = ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m MethodHacker.m UserDefaultsEditor.m
 CFLAGS  = -fobjc-arc -I.
-LDFLAGS = -lobjc -framework UIKit -framework Foundation
+LDFLAGS = -lobjc -framework UIKit -framework Foundation -framework QuartzCore
 OUTDIR  = packages
 
 ifdef THEOS
@@ -25,6 +25,7 @@ all:
 		$(FILES) \
 		-o $(OUTDIR)/$(PROJECT).dylib
 	@echo "✅ 编译完成: $(OUTDIR)/$(PROJECT).dylib"
+	@ls -la $(OUTDIR)/$(PROJECT).dylib
 
 clean:
 	rm -rf $(OUTDIR)

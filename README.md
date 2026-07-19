@@ -1,139 +1,116 @@
-# ClassDumpDylib — iOS Runtime 类信息检索 dylib
+# ClassDumpDylib — iOS Runtime 逆向工具箱
 
 **纯 dylib，无 Substrate 依赖，TrollStore 可用，支持 iOS 14+。**
+
+三指不用了：用 **双指长按 0.6 秒**，或 **音量 + 连按 3 次** 呼出面板。
 
 ## 功能
 
 | 功能 | 说明 |
 |------|------|
-| 🔍 Runtime 搜索 | 遍历 App 所有 OC 类/方法/属性，按关键词匹配 |
-| 📋 自动复制 | 结果格式化为 Markdown，自动复制到剪贴板 |
-| 🖐️ 三指长按 | 0.8 秒呼出半透明搜索面板 |
-| 📱 iOS 14+ | 兼容 iOS 14 ~ 18 |
-| 🧩 无依赖 | 纯 Objective-C + Runtime API，无需 Cydia Substrate |
+| Runtime 搜索 | 类名 / 实例方法 / 类方法 / 属性 / Ivar，关键词匹配 |
+| App 优先过滤 | 默认只扫主程序与 App 内 Framework，结果更干净 |
+| 一键 Hook | 点击搜索结果 → YES/NO/1/nil，自动识别返回类型 |
+| 批量快速 Hook | 按方法名（如 `isVIP`）扫描全部类并批量替换 |
+| 属性 Hook | 自动解析 getter / `isXxx` |
+| UserDefaults | 搜索、编辑、新增、删除，支持 YES/NO/数字智能类型 |
+| 导出代码 | 活跃 Hook 导出为 Logos / 纯 ObjC 片段 |
+| 类 Dump | 一键复制完整 `@interface` 定义 |
+| 自动复制 | 搜索报告 Markdown 自动进剪贴板 |
+| 无依赖 | 纯 Objective-C + Runtime，无需 Cydia Substrate |
 
-## 编译方法（三选一）
-
-### ① GitHub Actions（推荐，无需 Mac）
-
-1. 把整个 `ClassDumpTweak/` 文件夹推送到 GitHub 仓库
-2. 在 GitHub 页面点 **Actions** → **Build ClassDumpDylib** → **Run workflow**
-3. 构建完成后下载 `ClassDumpDylib.dylib` 工件
-
-### ② 在 iOS 设备上编译（需已安装 Theos）
-
-```bash
-# SSH 到设备或使用 NewTerm
-cd /path/to/ClassDumpTweak
-export THEOS=/var/theos
-make
-```
-
-产物在 `packages/ClassDumpDylib.dylib`。
-
-### ③ macOS 本地编译
-
-```bash
-cd /path/to/ClassDumpTweak
-chmod +x build.sh
-./build.sh
-```
-
-## 注入方法（TrollStore）
-
-### 步骤
-
-1. **获取目标 App 的 IPA**（用 TrollDecrypt 砸壳或从其他来源获取）
-2. **解压 IPA**，找到其中的 App 二进制（`Payload/xxx.app/xxx`）
-3. **用 `insert_dylib` 注入 dylib**：
-   ```bash
-   # 将 dylib 复制到 App 包内
-   cp ClassDumpDylib.dylib Payload/xxx.app/
-   
-   # 注入
-   insert_dylib @executable_path/ClassDumpDylib.dylib \
-     Payload/xxx.app/xxx \
-     --inplace \
-     --all-yes
-   ```
-4. **重新打包 IPA**，用 **TrollStore** 安装
-5. **打开 App**，三指长按 0.8 秒呼出搜索面板
-
-### 一键注入脚本（可选）
-
-在 iOS 设备上，也可以用 **Filza** 直接操作：
-1. 把 `.dylib` 复制到 `/var/containers/Bundle/Application/xxx/xxx.app/`
-2. 用 Filza 打开 App 二进制，选择「二进制转换器」→「添加加载命令」
-3. 或者用 `TrollInject` 工具图形化注入
-
-## 使用说明
+## 呼出方式
 
 | 操作 | 效果 |
 |------|------|
-| 三指长按 0.8s | 打开搜索面板 |
-| 输入关键词 → 点搜索 | 遍历并显示结果 |
-| 结果自动复制 | 粘贴给 AI 分析 |
-| 点击面板外 | 收起键盘 |
-| 点击 ✕ | 关闭面板 |
+| 双指长按 0.6s | 打开工具箱面板 |
+| 音量 + 连按 3 次（2 秒内） | 备用入口 |
+| 底部 Tab | 搜索 / Hook / Defaults |
+| 点 ✕ | 关闭面板 |
 
-## 关键词搜索示例
+## 编译方法
 
-| 关键词 | 搜索目标 |
-|--------|----------|
-| `vip` | 会员相关类/方法 |
-| `token` | 令牌/认证相关 |
-| `user` | 用户模型相关 |
-| `pay` | 支付相关 |
-| `api` | 网络请求相关 |
-| `secret` | 密钥相关 |
+### ① GitHub Actions（推荐，无需 Mac）
 
-## 输出示例
+1. 推送到 GitHub
+2. **Actions** → **Build ClassDumpDylib** → **Run workflow**
+3. 下载工件 `ClassDumpDylib.dylib`
 
-```
-# iOS 应用逆向分析报告
-## 搜索关键词: vip
-## Bundle ID: com.example.app
-----
-找到 5 个相关结果：
+### ② 本地 / 设备
 
-1. **VIPManager**
-    - 匹配类型：类名
-    - 名称：`VIPManager`
-
-2. **UserInfo**
-    - 匹配类型：实例方法
-    - 名称：`isVIPMember`
-
-3. **PurchaseManager**
-    - 匹配类型：属性
-    - 名称：`vipExpireDate`
-...
+```bash
+# macOS 或已装 Theos 的环境
+chmod +x build.sh
+./build.sh
+# 或
+make
 ```
 
-## 核心 API
+产物：`packages/ClassDumpDylib.dylib`
 
-| Runtime API | 用途 |
-|-------------|------|
-| `objc_getClassList()` | 获取所有已注册类 |
-| `class_copyMethodList()` | 获取实例方法列表 |
-| `objc_getMetaClass()` | 获取元类（遍历类方法） |
-| `class_copyPropertyList()` | 获取属性列表 |
-| `method_getName()` | 获取方法名 SEL |
-| `NSStringFromSelector()` | SEL → 字符串 |
-| `UIPasteboard.generalPasteboard.string` | 写入剪贴板 |
+**务必包含这 5 个源文件**（旧 Makefile 漏编会导致 Hook / Defaults 全挂）：
+
+- `ClassDumpEntry.m`
+- `ClassDumpSearcher.m`
+- `SearchOverlayWindow.m`
+- `MethodHacker.m`
+- `UserDefaultsEditor.m`
+
+## 注入（TrollStore）
+
+```bash
+cp ClassDumpDylib.dylib Payload/xxx.app/
+insert_dylib @executable_path/ClassDumpDylib.dylib \
+  Payload/xxx.app/xxx \
+  --inplace --all-yes
+```
+
+也可用 Filza / TrollInject 图形化注入，再重打包用 TrollStore 安装。
+
+## 使用建议
+
+1. 打开 App → 双指长按 → 搜 `vip` / `premium` / `token`
+2. 点结果 → **Hook → YES**（返回类型自动识别）
+3. 或在 Hook Tab 点快速模板批量扫 `isVip` 等
+4. Defaults Tab 改本地开关后杀进程重进验证
+
+> 仅对「本地判断会员 / 本地广告」类逻辑有效。服务端校验、IAP 收据、加密登录态无法靠本地 Hook 变成真会员。
+
+## 关键词示例
+
+| 关键词 | 目标 |
+|--------|------|
+| `vip` / `svip` | 会员 |
+| `premium` / `pro` | 高级版 |
+| `token` / `auth` | 认证 |
+| `pay` / `purchase` | 支付 |
+| `ad` / `banner` | 广告 |
+| `unlock` / `lock` | 解锁 |
 
 ## 文件结构
 
 ```
-ClassDumpTweak/
-├── ClassDumpEntry.m          # dylib 入口（constructor + Method Swizzle）
-├── ClassDumpSearcher.h       # 核心搜索接口
-├── ClassDumpSearcher.m       # Runtime 遍历实现
-├── SearchOverlayWindow.h     # UI 覆盖层接口
-├── SearchOverlayWindow.m     # 搜索面板 UI 实现
-├── Makefile                  # 编译配置（支持 Theos / 原生 clang）
-├── build.sh                  # iOS 设备一键编译脚本
-├── control                   # 包信息
-├── .github/workflows/        # GitHub Actions 自动编译
-└── README.md
+plugin/
+├── ClassDumpEntry.m          # dylib 入口 + 手势 / 音量键
+├── ClassDumpSearcher.h/.m    # Runtime 搜索 + dump
+├── SearchOverlayWindow.h/.m  # 三 Tab UI 面板
+├── MethodHacker.h/.m         # 方法 / 属性 Hook
+├── UserDefaultsEditor.h/.m   # NSUserDefaults 读写
+├── Makefile / build.sh
+├── .github/workflows/build.yml
+├── src/                      # 可选：悬浮球 VIP/去广告工具箱（独立入口）
+└── frida/                    # 可选：Frida 脚本
 ```
+
+## 变更摘要（本次修复）
+
+- **构建漏文件**：Hook / Defaults 以前经常链接不进 dylib，现已全部编入
+- **弹窗被挡**：Alert 改到工具箱自己的 `rootViewController` 上 present
+- **导出崩溃**：补全缺失的 `exportTweakTapped`
+- **Hook 更稳**：`returnType=auto`、属性 getter、父类方法复制、批量按方法名
+- **搜索更准**：默认过滤系统类 + App 镜像优先，支持 Ivar / dump 类
+- **入口更可靠**：多 Window 装手势 + 音量键备用 + 多次重试安装
+
+## License
+
+仅供学习与安全研究。请勿用于未授权破解商业软件。
