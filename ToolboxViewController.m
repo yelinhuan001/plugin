@@ -61,17 +61,14 @@ static ToolboxViewController *_sharedToolbox = nil;
     if (@available(iOS 15.0, *)) {
         UISheetPresentationController *sheet = nav.sheetPresentationController;
         if (sheet) {
+            // 使用标准 detent API (iOS 15+)
             sheet.detents = @[
-                [UISheetPresentationControllerDetent detentWithIdentifier:@"medium" resolvedBlock:^CGFloat(id<UserFloatEffectiveRange> _Nonnull context) {
-                    return UIScreen.mainScreen.bounds.size.height * 0.55;
-                }],
-                [UISheetPresentationControllerDetent detentWithIdentifier:@"large" resolvedBlock:^CGFloat(id<UserFloatEffectiveRange> _Nonnull context) {
-                    return UIScreen.mainScreen.bounds.size.height * 0.85;
-                }]
+                [UISheetPresentationControllerDetent mediumDetent],
+                [UISheetPresentationControllerDetent largeDetent]
             ];
-            sheet.selectedDetentIdentifier = @"medium";
+            sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierMedium;
             sheet.prefersGrabberVisible = YES;
-            sheet.largestUndimmedDetentIdentifier = @"large";
+            sheet.largestUndimmedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
         }
     }
 
