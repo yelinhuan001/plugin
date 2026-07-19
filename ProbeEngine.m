@@ -194,20 +194,24 @@ static NSArray<NSString *> *_defaultKeywords = nil;
 
         // 尝试调用 getter 获取值
         @try {
-            id target = isClassMethod ? cls : [cls alloc];
-            if (!isClassMethod) {
-                // 实例方法需要创建实例，但有些类不能直接 alloc（如 Singleton）
-                // 尝试通过 sharedInstance/shared 获取
+            id target = nil;
+            if (isClassMethod) {
+                target = cls;
+            } else {
+                // 先尝试 sharedInstance/shared
                 SEL sharedSel = NSSelectorFromString(@"sharedInstance");
                 if (![cls respondsToSelector:sharedSel]) {
                     sharedSel = NSSelectorFromString(@"shared");
                 }
                 if ([cls respondsToSelector:sharedSel]) {
-                    IMP imp = [cls methodForSelector:sharedSel];
-                    id (*func)(id, SEL) = (void *)imp;
-                    target = func(cls, sharedSel);
+                    target = [cls performSelector:sharedSel];
                 } else {
-                    target = [cls alloc];
+                    // 尝试 alloc/init
+                    id alloced = [cls alloc];
+                    if (alloced) {
+                        target = [alloced init];
+                        if (!target) target = alloced;
+                    }
                 }
             }
 
