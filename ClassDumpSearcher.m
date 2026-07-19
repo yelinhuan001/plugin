@@ -1,37 +1,24 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
-#import "MethodHacker.h"
+#import "ClassDumpSearcher.h"
+#import <objc/runtime.h>
 
-@implementation ActiveHook
-+ (instancetype)hookWithClass:(NSString *)cls method:(NSString *)sel isClass:(BOOL)cm returnType:(NSString *)type value:(id)val {
-    ActiveHook *h = [self new];
-    h.className = cls; h.methodName = sel; h.isClassMethod = cm; h.returnType = type; h.returnValue = val;
-    return h;
-}
-@end
-
-@implementation MethodHacker
-static NSMutableArray *_hooks;
-
-+ (void)initialize {
-    if (self == [MethodHacker class]) _hooks = [NSMutableArray array];
-}
-
-+ (NSArray *)activeHooks { return [_hooks copy]; }
-
-+ (BOOL)hookMethodWithClass:(NSString *)className methodName:(NSString *)methodName isClassMethod:(BOOL)isClassMethod returnType:(NSString *)returnType value:(id)value {
-    Class cls = NSClassFromString(className);
-    if (!cls) return NO;
-    Class target = isClassMethod ? object_getClass(cls) : cls;
-    SEL sel = NSSelectorFromString(methodName);
-    Method method = class_getInstanceMethod(target, sel);
-    if (!method) return NO;
-
-    IMP newImp = imp_implementationWithBlock(^(id _self) { return value; });
-    method_setImplementation(method, newImp);
-    
-    ActiveHook *h = [ActiveHook hookWithClass:className method:methodName isClass:isClassMethod returnType:returnType value:value];
-    [_hooks addObject:h];
-    return YES;
+@implementation ClassDumpSearcher
++ (NSArray *)searchClassesWithKeyword:(NSString *)keyword {
+    NSMutableArray *results = [NSMutableArray array];
+    int numClasses = objc_getClassList(NULL, 0);
+    if (numClasses > 0) {
+        Class *classes = (__unsafe_unretained Class *)malloc(sizeof(Class) * numClasses);
+        numClasses = objc_getClassList(classes, numClasses);
+        NSString *lowerKeyword = [keyword lowercaseString];
+        for (int i = 0; i < numClasses; i++) {
+            NSString *className = NSStringFromClass(classes[i]);
+            if (keyword.length == 0 || [[className lowercaseString] containsString:lowerKeyword]) {
+                [results addObject:className];
+            }
+        }
+        free(classes);
+    }
+    return [results sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
 }
 @end
