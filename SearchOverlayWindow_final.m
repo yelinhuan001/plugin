@@ -2,6 +2,7 @@
 #import "ClassDumpSearcher.h"
 #import "MethodHacker.h"
 #import "UserDefaultsEditor.h"
+#import <objc/runtime.h>  // 用于 objc_setAssociatedObject / objc_getAssociatedObject
 
 typedef NS_ENUM(NSUInteger, OverlayTab) {
     OverlayTabSearch   = 0,
@@ -221,6 +222,7 @@ static SearchOverlayWindow *_sharedOverlay = nil;
     if (kw.length == 0) { self.resultView.text = @"⚠️ 请输入关键词"; return; }
     self.resultView.text = @""; [self.spinner startAnimating]; self.searchButton.enabled = NO;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // searchAndCopyWithKeyword: 现在已在 ClassDumpSearcher 中实现
         NSString *r = [ClassDumpSearcher searchAndCopyWithKeyword:kw];
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.spinner stopAnimating]; self.searchButton.enabled = YES;
@@ -441,8 +443,14 @@ static SearchOverlayWindow *_sharedOverlay = nil;
 }
 
 - (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)ed forRowAtIndexPath:(NSIndexPath *)ip {
-    if (t == self.hooksTable) { [MethodHacker unhook:self.hooksList[ip.row]]; [self refreshHooksList]; }
-    else { [UserDefaultsEditor removeKey:self.defaultsKeys[ip.row]]; [self refreshDefaults]; }
+    if (t == self.hooksTable) {
+        // unhook: 现在已在 MethodHacker 中实现
+        [MethodHacker unhook:self.hooksList[ip.row]];
+        [self refreshHooksList];
+    } else {
+        [UserDefaultsEditor removeKey:self.defaultsKeys[ip.row]];
+        [self refreshDefaults];
+    }
 }
 
 - (NSString *)tableView:(UITableView *)t titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)ip {
