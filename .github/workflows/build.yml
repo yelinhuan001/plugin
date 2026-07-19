@@ -7,37 +7,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 诊断
-        run: |
-          echo "=== 系统 ==="
-          uname -a
-          echo "=== Xcode列表 ==="
-          ls -d /Applications/Xcode*.app 2>/dev/null || echo "无"
-          echo "=== 当前Xcode ==="
-          xcode-select -p 2>&1
-          echo "=== SDK查找 ==="
-          xcrun --sdk iphoneos --show-sdk-path 2>&1 || echo "xcrun失败"
-          find /Applications -name "iPhoneOS.sdk" -maxdepth 6 2>/dev/null | head -3
-          find /Library/Developer -name "iPhoneOS.sdk" -maxdepth 6 2>/dev/null | head -3
-          echo "=== clang版本 ==="
-          clang --version 2>&1
+      - name: 安装依赖 (ldid)
+        run: brew install ldid
 
       - name: 编译
         run: |
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || find /Applications -name "iPhoneOS.sdk" -type d 2>/dev/null | head -1)
-          echo "最终SDK: $SDK"
-          mkdir -p packages
-          clang -shared -fobjc-arc -I. \
-            -isysroot "$SDK" \
-            -arch arm64 \
-            -miphoneos-version-min=14.0 \
-            -lobjc -framework UIKit -framework Foundation \
-            ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m MethodHacker.m UserDefaultsEditor.m \
-            -o packages/ClassDumpDylib.dylib 2>&1
-          echo "退出码: $?"
+          # 直接调用你仓库里的 Makefile
+          make
 
-      - name: 上传
-        if: hashFiles('packages/ClassDumpDylib.dylib') != ''
+      - name: 上传产物
+        # 这里的路径要对应 Makefile 里的 OUTDIR (packages)
         uses: actions/upload-artifact@v4
         with:
           name: ClassDumpDylib
