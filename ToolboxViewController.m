@@ -5,658 +5,711 @@
 #import "ProbeEngine.h"
 #import <objc/runtime.h>
 
-// ======== FloatingButton ========
-@interface FloatingButton : UIView
-+ (instancetype)sharedButton;
-+ (void)show;
-+ (void)hide;
+// ============================================================
+#pragma mark - FloatingButton
+// ============================================================
+@implementation FloatingButton {
+    UIPanGestureRecognizer *_pan;
+    UITapGestureRecognizer *_tap;
+}
+
+static FloatingButton *_sharedBtn = nil;
+
++ (instancetype)sharedButton {
+    if (!_sharedBtn) {
+        _sharedBtn = [[self alloc] initWithFrame:CGRectMake(15, 120, 46, 46)];
+    }
+    return _sharedBtn;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.backgroundColor = [UIColor colorWithRed:0.2 green:0.4 blue:0.8 alpha:0.9];
+        self.layer.cornerRadius = 23;
+        self.layer.shadowColor = UIColor.blackColor.CGColor;
+        self.layer.shadowOffset = CGSizeMake(0, 3);
+        self.layer.shadowOpacity = 0.35;
+        self.layer.shadowRadius = 5;
+        self.userInteractionEnabled = YES;
+
+        UILabel *icon = [[UILabel alloc] initWithFrame:self.bounds];
+        icon.text = @"🔧";
+        icon.textAlignment = NSTextAlignmentCenter;
+        icon.font = [UIFont systemFontOfSize:22];
+        icon.userInteractionEnabled = NO;
+        [self addSubview:icon];
+
+        _tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(didTap)];
+        [self addGestureRecognizer:_tap];
+
+        _pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(didPan:)];
+        [_pan requireGestureRecognizerToFail:_tap];
+        [self addGestureRecognizer:_pan];
+    }
+    return self;
+}
+
+- (void)didTap {
+    [ToolboxMenuController show];
+}
+
+- (void)didPan:(UIPanGestureRecognizer *)g {
+    UIView *superview = self.superview;
+    if (!superview) return;
+    CGPoint t = [g translationInView:superview];
+    CGPoint c = CGPointMake(self.center.x + t.x, self.center.y + t.y);
+    CGFloat hw = self.frame.size.width/2, hh = self.frame.size.height/2;
+    c.x = MAX(hw, MIN(superview.bounds.size.width - hw, c.x));
+    c.y = MAX(hh + 60, MIN(superview.bounds.size.height - hh, c.y));
+    self.center = c;
+    [g setTranslation:CGPointZero inView:superview];
+    if (g.state == UIGestureRecognizerStateEnded) {
+        CGFloat targetX = (c.x < superview.bounds.size.width/2) ? hw + 6 : superview.bounds.size.width - hw - 6;
+        [UIView animateWithDuration:0.25 animations:^{
+            self.center = CGPointMake(targetX, self.center.y);
+        }];
+    }
+}
+
 @end
 
-static FloatingButton *_sharedFloatingButton = nil;
-static ToolboxViewController *_sharedToolbox = nil;
+#pragma mark - 入口
+__attribute__((constructor)) static void toolbox_init() {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        FloatingButton *btn = [FloatingButton sharedButton];
+        UIWindow *target = nil;
+        if (@available(iOS 13, *)) {
+            for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+                if ([s isKindOfClass:UIWindowScene.class]) {
+                    UIWindowScene *ws = (UIWindowScene *)s;
+                    if (ws.activationState == UISceneActivationStateForegroundActive) {
+                        target = ws.windows.firstObject;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!target) target = UIApplication.sharedApplication.keyWindow;
+        if (!target) target = UIApplication.sharedApplication.windows.firstObject;
+        if (target) {
+            [target addSubview:btn];
+            NSLog(@"[Toolbox] 注入成功！点击🔧浮动按钮打开工具箱");
+        }
+    });
+}
 
-// ======== ToolboxViewController ========
-@interface ToolboxViewController () <UITextFieldDelegate, UITableViewDataSource, UITableViewDelegate>
-@property (nonatomic, strong) UIView *contentView;
-@property (nonatomic, strong) UIScrollView *tabScrollView;
-@property (nonatomic, strong) NSMutableArray<UIButton *> *tabButtons;
-@property (nonatomic, assign) NSInteger currentTab;
-// 搜索
-@property (nonatomic, strong) UITextField *searchField;
-@property (nonatomic, strong) UITextView *resultView;
-@property (nonatomic, strong) UIActivityIndicatorView *spinner;
-// Hook
-@property (nonatomic, strong) UITableView *hooksTable;
-@property (nonatomic, strong) NSArray<ActiveHook *> *hooksList;
-// 探测
-@property (nonatomic, strong) UIButton *probeButton;
-@property (nonatomic, strong) UIProgressView *probeProgress;
-@property (nonatomic, strong) UILabel *probeStatusLabel;
-@property (nonatomic, strong) UITextView *probeResultView;
-@property (nonatomic, strong) UIActivityIndicatorView *probeSpinner;
-// 默认值
-@property (nonatomic, strong) UITextField *defaultsSearchField;
-@property (nonatomic, strong) UITableView *defaultsTable;
-@property (nonatomic, strong) NSDictionary *defaultsData;
-@property (nonatomic, strong) NSArray *defaultsKeys;
-// 日志
-@property (nonatomic, strong) UITextView *logView;
-@property (nonatomic, strong) UIButton *clearLogButton;
-@end
+// ============================================================
+#pragma mark - ToolboxMenuController (主菜单)
+// ============================================================
+@implementation ToolboxMenuController
 
-@implementation ToolboxViewController
+static ToolboxMenuController *_menu = nil;
+static UINavigationController *_nav = nil;
 
 + (void)show {
-    if (_sharedToolbox) {
-        [_sharedToolbox dismissViewControllerAnimated:NO completion:nil];
-        _sharedToolbox = nil;
+    if (_nav && _nav.presentingViewController) {
+        [_nav dismissViewControllerAnimated:YES completion:nil];
+        _nav = nil; _menu = nil;
         return;
     }
-    ToolboxViewController *vc = [ToolboxViewController new];
-    _sharedToolbox = vc;
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    _menu = [[self alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    _menu.title = @"🔧 工具箱";
+    _nav = [[UINavigationController alloc] initWithRootViewController:_menu];
+    _nav.modalPresentationStyle = UIModalPresentationPageSheet;
     
-    // iOS 15+ 底部 Sheet
-    if (@available(iOS 15.0, *)) {
-        UISheetPresentationController *sheet = nav.sheetPresentationController;
-        if (sheet) {
-            // 使用标准 detent API (iOS 15+)
-            sheet.detents = @[
-                [UISheetPresentationControllerDetent mediumDetent],
-                [UISheetPresentationControllerDetent largeDetent]
-            ];
-            sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierMedium;
-            sheet.prefersGrabberVisible = YES;
-            sheet.largestUndimmedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
-        }
+    if (@available(iOS 15, *)) {
+        UISheetPresentationController *sheet = _nav.sheetPresentationController;
+        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent,
+                          UISheetPresentationControllerDetent.largeDetent];
+        sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierMedium;
+        sheet.prefersGrabberVisible = YES;
+        sheet.largestUndimmedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
     }
 
-    UIViewController *root = [self _rootVC];
-    [root presentViewController:nav animated:YES completion:nil];
+    UIViewController *root = [self _topVC];
+    [root presentViewController:_nav animated:YES completion:nil];
 }
 
-+ (void)dismiss {
-    [_sharedToolbox dismissViewControllerAnimated:YES completion:nil];
-    _sharedToolbox = nil;
-}
-
-+ (BOOL)isVisible { return _sharedToolbox != nil; }
-
-+ (UIViewController *)_rootVC {
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-            if ([s isKindOfClass:[UIWindowScene class]]) {
++ (UIViewController *)_topVC {
+    if (@available(iOS 13, *)) {
+        for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+            if ([s isKindOfClass:UIWindowScene.class]) {
                 for (UIWindow *w in [(UIWindowScene *)s windows]) {
                     UIViewController *r = w.rootViewController;
-                    if (r) { while (r.presentedViewController) r = r.presentedViewController; return r; }
+                    if (!r) continue;
+                    while (r.presentedViewController) r = r.presentedViewController;
+                    return r;
                 }
             }
         }
     }
-    UIViewController *r = [UIApplication sharedApplication].keyWindow.rootViewController;
-    if (r) { while (r.presentedViewController) r = r.presentedViewController; }
-    return r ?: [UIViewController new];
+    UIViewController *r = UIApplication.sharedApplication.keyWindow.rootViewController;
+    while (r.presentedViewController) r = r.presentedViewController;
+    return r;
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"🔧 Runtime 工具箱";
+    self.tableView.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+    self.tableView.separatorColor = [UIColor colorWithWhite:0.3 alpha:0.4];
+    self.tableView.rowHeight = 52;
+    
+    UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithTitle:@"✕" style:UIBarButtonItemStyleDone
+                                                             target:self action:@selector(dismissSelf)];
+    close.tintColor = UIColor.lightGrayColor;
+    self.navigationItem.rightBarButtonItem = close;
+}
+
+- (void)dismissSelf {
+    [self dismissViewControllerAnimated:YES completion:nil];
+    _nav = nil; _menu = nil;
+}
+
+// MARK: - Table Data
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 4; }
+
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec {
+    return @[@1, @2, @2, @1][sec].integerValue;
+}
+
+- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)sec {
+    return @[@"🔍 类搜索", @"🪝 Hook", @"📡 探测", @"📋 其他"][sec];
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"cell"];
+    if (!c) {
+        c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
+        c.backgroundColor = [UIColor colorWithWhite:0.18 alpha:1];
+        c.textLabel.textColor = UIColor.whiteColor;
+        c.detailTextLabel.textColor = UIColor.lightGrayColor;
+        c.textLabel.font = [UIFont systemFontOfSize:15];
+        c.detailTextLabel.font = [UIFont systemFontOfSize:11];
+        c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    }
+    
+    NSArray *rows = @[
+        @[@{@"title":@"🔍 搜索类与方法", @"sub":@"按关键词搜索运行时类和方法"}],
+        @[@{@"title":@"🪝 Hook 管理", @"sub":@"查看/添加/删除 Hook"},
+          @{@"title":@"⚡ 快速 Hook", @"sub":@"一键 Hook VIP/去广告模板"}],
+        @[@{@"title":@"📡 运行时探测", @"sub":@"自动扫描关键词方法并获取返回值"},
+          @{@"title":@"🦸 VIP 专项分析", @"sub":@"专门扫描 VIP/会员相关方法"}],
+        @[@{@"title":@"⚙️ UserDefaults", @"sub":@"浏览/编辑 NSUserDefaults"}],
+    ];
+    NSDictionary *d = rows[ip.section][ip.row];
+    c.textLabel.text = d[@"title"];
+    c.detailTextLabel.text = d[@"sub"];
+    return c;
+}
+
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [tv deselectRowAtIndexPath:ip animated:YES];
+    UIViewController *vc = nil;
+    
+    if (ip.section == 0) {
+        vc = [ClassSearchController new];
+    } else if (ip.section == 1) {
+        if (ip.row == 0) vc = [HookManageController new];
+        else vc = [QuickHookController new];
+    } else if (ip.section == 2) {
+        if (ip.row == 0) vc = [ProbeController new];
+        else vc = [VIPProbeController new];
+    } else if (ip.section == 3) {
+        vc = [DefaultsEditorController new];
+    }
+    if (vc) [self.navigationController pushViewController:vc animated:YES];
+}
+
+@end
+
+// ============================================================
+#pragma mark - ClassSearchController
+// ============================================================
+@implementation ClassSearchController {
+    UITextField *_field;
+    UITextView *_result;
+    UIActivityIndicatorView *_spinner;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"🔍 类搜索";
     self.view.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
     
-    UIBarButtonItem *closeBtn = [[UIBarButtonItem alloc] initWithTitle:@"✕" style:UIBarButtonItemStyleDone
-                                                                target:self action:@selector(closeTapped)];
-    closeBtn.tintColor = [UIColor lightGrayColor];
-    self.navigationItem.leftBarButtonItem = closeBtn;
-
-    // 内容区域
-    CGFloat w = self.view.frame.size.width;
-    CGFloat h = self.view.frame.size.height - 100;
-    self.contentView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, h)];
-    self.contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:self.contentView];
-
-    // Tab 栏
-    [self setupTabs];
-    [self buildSearchPanel];
-    [self buildHooksPanel];
-    [self buildProbePanel];
-    [self buildDefaultsPanel];
-    [self buildLogsPanel];
-    [self switchToTab:0];
+    _field = [[UITextField alloc] initWithFrame:CGRectMake(12, 10, self.view.frame.size.width-24, 36)];
+    _field.placeholder = @"关键词 (vip, token...)";
+    _field.textColor = UIColor.whiteColor;
+    _field.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1];
+    _field.layer.cornerRadius = 8;
+    _field.leftView = [[UIView alloc] initWithFrame:CGRectMake(0,0,10,0)];
+    _field.leftViewMode = UITextFieldViewModeAlways;
+    _field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    _field.autocorrectionType = UITextAutocorrectionTypeNo;
+    _field.returnKeyType = UIReturnKeySearch;
+    _field.font = [UIFont systemFontOfSize:14];
+    _field.delegate = self;
+    _field.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_field];
     
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(hookLogDidUpdate:)
-                                                 name:HookLogDidUpdateNotification object:nil];
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [btn setTitle:@"搜索" forState:UIControlStateNormal];
+    [btn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    btn.backgroundColor = UIColor.systemBlueColor;
+    btn.layer.cornerRadius = 8;
+    btn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [btn addTarget:self action:@selector(search) forControlEvents:UIControlEventTouchUpInside];
+    btn.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:btn];
+    
+    _result = [UITextView new];
+    _result.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
+    _result.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
+    _result.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
+    _result.editable = NO;
+    _result.layer.cornerRadius = 8;
+    _result.translatesAutoresizingMaskIntoConstraints = NO;
+    _result.text = @"输入关键词，点击搜索";
+    [self.view addSubview:_result];
+    
+    _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    _spinner.hidesWhenStopped = YES;
+    _spinner.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_spinner];
+    
+    // Auto Layout
+    [NSLayoutConstraint activateConstraints:@[
+        [_field.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
+        [_field.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+        [_field.trailingAnchor constraintEqualToAnchor:btn.leadingAnchor constant:-8],
+        [_field.heightAnchor constraintEqualToConstant:36],
+        
+        [btn.centerYAnchor constraintEqualToAnchor:_field.centerYAnchor],
+        [btn.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [btn.widthAnchor constraintEqualToConstant:60],
+        [btn.heightAnchor constraintEqualToConstant:36],
+        
+        [_result.topAnchor constraintEqualToAnchor:_field.bottomAnchor constant:10],
+        [_result.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:6],
+        [_result.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-6],
+        [_result.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-10],
+        
+        [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+    ]];
 }
 
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
-- (void)closeTapped { [ToolboxViewController dismiss]; }
-
-#pragma mark - Tab
-
-- (void)setupTabs {
-    CGFloat w = self.contentView.frame.size.width;
-    self.tabScrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, w, 40)];
-    self.tabScrollView.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1];
-    self.tabScrollView.showsHorizontalScrollIndicator = NO;
-    self.tabScrollView.contentSize = CGSizeMake(w, 40);
-    [self.contentView addSubview:self.tabScrollView];
-
-    self.tabButtons = [NSMutableArray array];
-    NSArray *tabs = @[@"🔍 搜索", @"🪝 Hook", @"📡 探测", @"⚙️ 默认值", @"📋 日志"];
-    CGFloat tw = MAX(w / tabs.count, 70);
-    for (int i = 0; i < tabs.count; i++) {
-        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-        b.frame = CGRectMake(i * tw, 0, tw, 40);
-        [b setTitle:tabs[i] forState:UIControlStateNormal];
-        [b setTitleColor:[UIColor grayColor] forState:UIControlStateNormal];
-        b.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-        b.tag = i;
-        [b addTarget:self action:@selector(tabTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self.tabScrollView addSubview:b];
-        [self.tabButtons addObject:b];
-    }
-    self.tabScrollView.contentSize = CGSizeMake(tw * tabs.count, 40);
-}
-
-- (void)tabTapped:(UIButton *)s { [self switchToTab:s.tag]; }
-
-- (void)switchToTab:(NSInteger)tab {
-    self.currentTab = tab;
-    UIColor *activeColor = [UIColor colorWithRed:0.25 green:0.45 blue:0.85 alpha:1];
-    for (UIView *v in self.contentView.subviews) {
-        if (v.tag >= 1001 && v.tag <= 1005) v.hidden = (v.tag != 1001 + tab);
-    }
-    for (UIButton *b in self.tabButtons) {
-        b.backgroundColor = [UIColor clearColor];
-        b.tintColor = [UIColor grayColor];
-    }
-    UIButton *active = self.tabButtons[tab];
-    active.backgroundColor = activeColor;
-    active.tintColor = [UIColor whiteColor];
-
-    if (tab == 1) [self refreshHooksList];
-    else if (tab == 3) [self refreshDefaults];
-    else if (tab == 4) [self refreshLogDisplay];
-}
-
-#pragma mark - 搜索
-
-- (void)buildSearchPanel {
-    CGFloat w = self.contentView.frame.size.width, h = self.contentView.frame.size.height;
-    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0, 40, w, h-40)]; v.tag = 1001;
-    UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(10, 8, w-80, 34)];
-    tf.placeholder = @"关键词 (vip, token...)"; tf.textColor = [UIColor whiteColor];
-    tf.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1]; tf.layer.cornerRadius = 8;
-    tf.leftView = [[UIView alloc] initWithFrame:CGRectMake(0,0,8,0)]; tf.leftViewMode = UITextFieldViewModeAlways;
-    tf.clearButtonMode = UITextFieldViewModeWhileEditing; tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    tf.autocorrectionType = UITextAutocorrectionTypeNo; tf.returnKeyType = UIReturnKeySearch;
-    tf.font = [UIFont systemFontOfSize:14]; tf.delegate = self;
-    [v addSubview:tf]; self.searchField = tf;
-
-    UIButton *sb = [UIButton buttonWithType:UIButtonTypeSystem];
-    sb.frame = CGRectMake(w-66, 8, 56, 34); [sb setTitle:@"搜索" forState:UIControlStateNormal];
-    [sb setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    sb.backgroundColor = [UIColor systemBlueColor]; sb.layer.cornerRadius = 8;
-    sb.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-    [sb addTarget:self action:@selector(searchTapped) forControlEvents:UIControlEventTouchUpInside];
-    [v addSubview:sb];
-
-    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    self.spinner.center = CGPointMake(w/2, h/2); self.spinner.hidesWhenStopped = YES;
-    [v addSubview:self.spinner];
-
-    self.resultView = [[UITextView alloc] initWithFrame:CGRectMake(6, 48, w-12, h-54)];
-    self.resultView.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
-    self.resultView.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
-    self.resultView.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
-    self.resultView.editable = NO; self.resultView.layer.cornerRadius = 8;
-    self.resultView.text = @"输入关键词搜索类和方法";
-    [v addSubview:self.resultView];
-    [self.contentView addSubview:v];
-}
-
-- (void)searchTapped {
-    [self.searchField resignFirstResponder];
-    NSString *kw = self.searchField.text;
-    if (kw.length == 0) { self.resultView.text = @"请输入关键词"; return; }
-    self.resultView.text = @""; [self.spinner startAnimating];
+- (void)search {
+    [_field resignFirstResponder];
+    NSString *kw = _field.text;
+    if (kw.length == 0) { _result.text = @"请输入关键词"; return; }
+    _result.text = @""; [_spinner startAnimating];
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         NSString *r = [ClassDumpSearcher searchAndCopyWithKeyword:kw];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self.spinner stopAnimating];
-            self.resultView.text = r;
+            [_spinner stopAnimating];
+            _result.text = r;
         });
     });
 }
 
-#pragma mark - Hook
+- (BOOL)textFieldShouldReturn:(UITextField *)t { [self search]; return YES; }
+@end
 
-- (void)buildHooksPanel {
-    CGFloat w = self.contentView.frame.size.width, h = self.contentView.frame.size.height;
-    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0, 40, w, h-40)]; v.tag = 1002;
+// ============================================================
+#pragma mark - QuickHookController
+// ============================================================
+@implementation QuickHookController {
+    NSArray *_templates;
+}
 
-    UIButton *addBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    addBtn.frame = CGRectMake(10, 4, w-20, 28);
-    [addBtn setTitle:@"➕ 添加自定义 Hook" forState:UIControlStateNormal];
-    [addBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    addBtn.backgroundColor = [UIColor colorWithRed:0.6 green:0.2 blue:0.2 alpha:1];
-    addBtn.layer.cornerRadius = 6; addBtn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    [addBtn addTarget:self action:@selector(addHookTapped) forControlEvents:UIControlEventTouchUpInside];
-    [v addSubview:addBtn];
-
-    CGFloat by = 36, bw = (w-36)/3;
-    NSArray *tpl = @[@[@"🦸 VIP", @"VIPManager", @"isVIPMember"],
-                     @[@"🦸 VIP", @"UserInfo", @"isVIP"],
-                     @[@"🦸 VIP", @"SettingsManager", @"isPremium"],
-                     @[@"🚫 广告", @"AdManager", @"shouldShowAd"],
-                     @[@"🔓 解锁", @"PaywallManager", @"isLocked"]];
-    for (int i = 0; i < (int)tpl.count; i++) {
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"⚡ 快速 Hook";
+    self.view.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+    
+    _templates = @[
+        @[@"🦸 VIP解锁", @"VIPManager", @"isVIPMember"],
+        @[@"🦸 VIP解锁", @"UserInfo", @"isVIP"],
+        @[@"🦸 VIP解锁", @"SettingsManager", @"isPremium"],
+        @[@"🚫 去广告", @"AdManager", @"shouldShowAd"],
+        @[@"🚫 去广告", @"ADManager", @"isAd"],
+        @[@"🔓 功能解锁", @"PaywallManager", @"isLocked"],
+        @[@"🔓 功能解锁", @"FeatureManager", @"hasAccess"],
+        @[@"🔓 功能解锁", @"PurchaseManager", @"hasPurchased"],
+    ];
+    
+    CGFloat y = 20, w = self.view.frame.size.width - 24;
+    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(12, y, w, 24)];
+    tip.text = @"点击以下模板一键 Hook：";
+    tip.textColor = UIColor.lightGrayColor;
+    tip.font = [UIFont systemFontOfSize:13];
+    [self.view addSubview:tip];
+    y += 30;
+    
+    for (int i = 0; i < _templates.count; i++) {
+        NSArray *t = _templates[i];
         UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-        b.frame = CGRectMake(10+(i%3)*(bw+6), by+(i/3)*28, bw, 24);
-        [b setTitle:tpl[i][0] forState:UIControlStateNormal];
-        [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        b.backgroundColor = [UIColor colorWithRed:0.25 green:0.35 blue:0.55 alpha:1];
-        b.layer.cornerRadius = 5; b.titleLabel.font = [UIFont systemFontOfSize:10];
-        objc_setAssociatedObject(b, "_cls", tpl[i][1], OBJC_ASSOCIATION_RETAIN);
-        objc_setAssociatedObject(b, "_sel", tpl[i][2], OBJC_ASSOCIATION_RETAIN);
-        [b addTarget:self action:@selector(quickHookTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [v addSubview:b];
+        b.frame = CGRectMake(12, y + (i/2)*50, (w-6)/2, 44);
+        b.backgroundColor = [UIColor colorWithRed:0.22 green:0.32 blue:0.52 alpha:1];
+        b.layer.cornerRadius = 10;
+        [b setTitle:t[0] forState:UIControlStateNormal];
+        [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        b.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+        b.tag = i;
+        [b addTarget:self action:@selector(hookTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [self.view addSubview:b];
     }
-
-    CGFloat tipY = by + ((int)tpl.count/3+1)*28 + 2;
-    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(10, tipY, w-20, 16)];
-    tip.text = @"活跃 Hook（左滑取消）"; tip.textColor = [UIColor lightGrayColor]; tip.font = [UIFont systemFontOfSize:10];
-    [v addSubview:tip];
-
-    self.hooksTable = [[UITableView alloc] initWithFrame:CGRectMake(0, tipY+18, w, h-tipY-18) style:UITableViewStylePlain];
-    self.hooksTable.backgroundColor = [UIColor clearColor]; self.hooksTable.dataSource = self;
-    self.hooksTable.delegate = self; self.hooksTable.separatorColor = [UIColor colorWithWhite:0.3 alpha:0.5];
-    [v addSubview:self.hooksTable];
-    [self.contentView addSubview:v];
+    
+    UILabel *tip2 = [[UILabel alloc] initWithFrame:CGRectMake(12, y + (_templates.count/2)*50 + 10, w, 20)];
+    tip2.text = @"💡 也可在「Hook管理」中自定义";
+    tip2.textColor = UIColor.darkGrayColor;
+    tip2.font = [UIFont systemFontOfSize:11];
+    [self.view addSubview:tip2];
 }
 
-- (void)quickHookTapped:(UIButton *)s {
-    NSString *c = objc_getAssociatedObject(s, "_cls"), *sel = objc_getAssociatedObject(s, "_sel");
-    if (!c || !sel) return;
-    BOOL yes = YES;
-    if ([sel containsString:@"Ad"]||[sel containsString:@"ad"]||[sel containsString:@"Locked"]) yes = NO;
-    BOOL ok = [MethodHacker hookMethodWithClass:c methodName:sel isClassMethod:NO returnType:@"BOOL" value:@(yes)];
-    [self showToast:ok ? [NSString stringWithFormat:@"✅ %@.%@ → %@",c,sel,yes?@"YES":@"NO"] : [NSString stringWithFormat:@"❌ %@.%@ 失败",c,sel]];
-    if (ok) [self refreshHooksList];
+- (void)hookTapped:(UIButton *)s {
+    NSArray *t = _templates[s.tag];
+    NSString *cls = t[1], *sel = t[2];
+    BOOL rYES = YES;
+    if ([sel containsString:@"Ad"]||[sel containsString:@"ad"]||[sel containsString:@"Locked"]||[sel containsString:@"lock"]) rYES = NO;
+    BOOL ok = [MethodHacker hookMethodWithClass:cls methodName:sel isClassMethod:NO returnType:@"BOOL" value:@(rYES)];
+    NSString *msg = ok ? [NSString stringWithFormat:@"✅ %@.%@ → %@", cls, sel, rYES?@"YES":@"NO"]
+                       : [NSString stringWithFormat:@"❌ %@.%@ 未找到", cls, sel];
+    [self toast:msg];
 }
 
-- (void)refreshHooksList { self.hooksList = [MethodHacker activeHooks]; [self.hooksTable reloadData]; }
+- (void)toast:(NSString *)msg {
+    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0,0,220,34)];
+    l.center = CGPointMake(self.view.frame.size.width/2, 80);
+    l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.85];
+    l.textColor = UIColor.whiteColor;
+    l.textAlignment = NSTextAlignmentCenter;
+    l.text = msg; l.layer.cornerRadius = 8;
+    l.clipsToBounds = YES; l.font = [UIFont systemFontOfSize:12];
+    [self.view addSubview:l];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [l removeFromSuperview];
+    });
+}
+@end
 
-- (void)addHookTapped {
+// ============================================================
+#pragma mark - HookManageController
+// ============================================================
+@implementation HookManageController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"🪝 Hook 管理";
+    self.tableView.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+    self.tableView.separatorColor = [UIColor colorWithWhite:0.3 alpha:0.4];
+    self.tableView.rowHeight = 50;
+    
+    UIBarButtonItem *add = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd
+                                                                        target:self action:@selector(addHook)];
+    add.tintColor = UIColor.systemBlueColor;
+    self.navigationItem.rightBarButtonItem = add;
+}
+
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec {
+    NSArray *hooks = [MethodHacker activeHooks];
+    return MAX(hooks.count, 1);
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"c"];
+    if (!c) {
+        c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
+        c.backgroundColor = [UIColor colorWithWhite:0.18 alpha:1];
+        c.textLabel.textColor = UIColor.whiteColor;
+        c.detailTextLabel.textColor = UIColor.lightGrayColor;
+        c.textLabel.font = [UIFont systemFontOfSize:14];
+        c.detailTextLabel.font = [UIFont systemFontOfSize:11];
+    }
+    NSArray *hooks = [MethodHacker activeHooks];
+    if (hooks.count == 0) {
+        c.textLabel.text = @"暂无活跃 Hook";
+        c.detailTextLabel.text = @"点击右上角 + 添加";
+        c.accessoryType = UITableViewCellAccessoryNone;
+    } else {
+        ActiveHook *h = hooks[ip.row];
+        c.textLabel.text = [NSString stringWithFormat:@"%@.%@", h.className, h.methodName];
+        c.detailTextLabel.text = [NSString stringWithFormat:@"值: %@ | 调用%lu次", h.returnValue?:@"void", (unsigned long)h.callCount];
+        c.accessoryType = UITableViewCellAccessoryNone;
+    }
+    return c;
+}
+
+- (BOOL)tableView:(UITableView *)tv canEditRowAtIndexPath:(NSIndexPath *)ip {
+    return [MethodHacker activeHooks].count > 0;
+}
+
+- (void)tableView:(UITableView *)tv commitEditingStyle:(UITableViewCellEditingStyle)ed forRowAtIndexPath:(NSIndexPath *)ip {
+    NSArray *hooks = [MethodHacker activeHooks];
+    if (ip.row < hooks.count) {
+        [MethodHacker unhook:hooks[ip.row]];
+        [tv reloadData];
+    }
+}
+
+- (void)addHook {
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"添加 Hook" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *t){ t.placeholder = @"类名"; }];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *t){ t.placeholder = @"方法名"; }];
-    __block NSString *st = @"BOOL"; __block int ti = 0;
-    [a addAction:[UIAlertAction actionWithTitle:@"类型: BOOL (切换)" style:UIAlertActionStyleDefault handler:^(id action){
-        ti = (ti+1)%5; st = @[@"BOOL",@"id",@"NSInteger",@"double",@"void"][ti];
-        [self addHookTapped];
-    }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDestructive handler:^(id action){
+    [a addTextFieldWithConfigurationHandler:^(UITextField *t){ t.placeholder = @"类名 (如 VIPManager)"; }];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *t){ t.placeholder = @"方法名 (如 isVIP)"; }];
+    [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDestructive handler:^(id act){
         NSString *c = [a.textFields[0].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         NSString *s = [a.textFields[1].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        if (c.length==0||s.length==0) return;
-        id val = @YES;
-        if ([st isEqualToString:@"id"]) val = @"(nil)";
-        else if ([st isEqualToString:@"NSInteger"]) val = @0;
-        else if ([st isEqualToString:@"double"]) val = @0.0;
-        else if ([st isEqualToString:@"void"]) val = nil;
-        BOOL ok = [MethodHacker hookMethodWithClass:c methodName:s isClassMethod:NO returnType:st value:val];
-        [self showToast:ok ? [NSString stringWithFormat:@"✅ %@.%@",c,s] : [NSString stringWithFormat:@"❌ %@.%@ 失败",c,s]];
-        if (ok) [self refreshHooksList];
+        if (c.length && s.length) {
+            [MethodHacker hookMethodWithClass:c methodName:s isClassMethod:NO returnType:@"BOOL" value:@YES];
+            [self.tableView reloadData];
+        }
     }]];
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
 }
 
-#pragma mark - 探测
-
-- (void)buildProbePanel {
-    CGFloat w = self.contentView.frame.size.width, h = self.contentView.frame.size.height;
-    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0, 40, w, h-40)]; v.tag = 1003;
-
-    self.probeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.probeButton.frame = CGRectMake(10, 6, 80, 30);
-    [self.probeButton setTitle:@"▶️ 开始探测" forState:UIControlStateNormal];
-    [self.probeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.probeButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.3 alpha:1];
-    self.probeButton.layer.cornerRadius = 6; self.probeButton.titleLabel.font = [UIFont boldSystemFontOfSize:11];
-    [self.probeButton addTarget:self action:@selector(probeTapped) forControlEvents:UIControlEventTouchUpInside];
-    [v addSubview:self.probeButton];
-
-    UIButton *vipBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    vipBtn.frame = CGRectMake(96, 6, 70, 30);
-    [vipBtn setTitle:@"🦸 VIP分析" forState:UIControlStateNormal];
-    [vipBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    vipBtn.backgroundColor = [UIColor colorWithRed:0.6 green:0.3 blue:0.1 alpha:1];
-    vipBtn.layer.cornerRadius = 6; vipBtn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
-    [vipBtn addTarget:self action:@selector(probeVIPTapped) forControlEvents:UIControlEventTouchUpInside];
-    [v addSubview:vipBtn];
-
-    self.probeProgress = [[UIProgressView alloc] initWithFrame:CGRectMake(172, 12, w-182, 4)];
-    self.probeProgress.progressTintColor = [UIColor systemGreenColor]; self.probeProgress.hidden = YES;
-    [v addSubview:self.probeProgress];
-
-    self.probeStatusLabel = [[UILabel alloc] initWithFrame:CGRectMake(172, 18, w-182, 18)];
-    self.probeStatusLabel.textColor = [UIColor lightGrayColor]; self.probeStatusLabel.font = [UIFont systemFontOfSize:10]; self.probeStatusLabel.hidden = YES;
-    [v addSubview:self.probeStatusLabel];
-
-    self.probeSpinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    self.probeSpinner.center = CGPointMake(w/2, h/2); self.probeSpinner.hidesWhenStopped = YES;
-    [v addSubview:self.probeSpinner];
-
-    self.probeResultView = [[UITextView alloc] initWithFrame:CGRectMake(6, 42, w-12, h-48)];
-    self.probeResultView.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
-    self.probeResultView.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
-    self.probeResultView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
-    self.probeResultView.editable = NO; self.probeResultView.layer.cornerRadius = 8;
-    self.probeResultView.text = @"点击「开始探测」自动扫描关键词方法";
-    [v addSubview:self.probeResultView];
-    [self.contentView addSubview:v];
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.tableView reloadData];
 }
 
-- (void)probeTapped {
-    self.probeButton.enabled = NO; self.probeProgress.hidden = NO; self.probeProgress.progress = 0;
-    self.probeStatusLabel.hidden = NO; self.probeStatusLabel.text = @"准备中...";
-    self.probeResultView.text = @""; [self.probeSpinner startAnimating];
+@end
+
+// ============================================================
+#pragma mark - ProbeController
+// ============================================================
+@implementation ProbeController {
+    UITextView *_resultView;
+    UIButton *_probeBtn;
+    UIProgressView *_progress;
+    UILabel *_statusLabel;
+    UIActivityIndicatorView *_spinner;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"📡 运行时探测";
+    self.view.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+    
+    _probeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_probeBtn setTitle:@"▶️ 开始探测" forState:UIControlStateNormal];
+    [_probeBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _probeBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.3 alpha:1];
+    _probeBtn.layer.cornerRadius = 8;
+    _probeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    [_probeBtn addTarget:self action:@selector(startProbe) forControlEvents:UIControlEventTouchUpInside];
+    _probeBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_probeBtn];
+    
+    _progress = [UIProgressView new];
+    _progress.progressTintColor = UIColor.systemGreenColor;
+    _progress.hidden = YES;
+    _progress.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_progress];
+    
+    _statusLabel = [UILabel new];
+    _statusLabel.textColor = UIColor.lightGrayColor;
+    _statusLabel.font = [UIFont systemFontOfSize:11];
+    _statusLabel.hidden = YES;
+    _statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_statusLabel];
+    
+    _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    _spinner.hidesWhenStopped = YES;
+    _spinner.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_spinner];
+    
+    _resultView = [UITextView new];
+    _resultView.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
+    _resultView.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
+    _resultView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    _resultView.editable = NO;
+    _resultView.layer.cornerRadius = 8;
+    _resultView.translatesAutoresizingMaskIntoConstraints = NO;
+    _resultView.text = @"点击「开始探测」自动扫描 300+ 类的关键词方法";
+    [self.view addSubview:_resultView];
+    
+    [NSLayoutConstraint activateConstraints:@[
+        [_probeBtn.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
+        [_probeBtn.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+        [_probeBtn.widthAnchor constraintEqualToConstant:110],
+        [_probeBtn.heightAnchor constraintEqualToConstant:34],
+        
+        [_progress.topAnchor constraintEqualToAnchor:_probeBtn.bottomAnchor constant:8],
+        [_progress.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+        [_progress.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        [_progress.heightAnchor constraintEqualToConstant:4],
+        
+        [_statusLabel.topAnchor constraintEqualToAnchor:_progress.bottomAnchor constant:2],
+        [_statusLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+        [_statusLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-12],
+        
+        [_resultView.topAnchor constraintEqualToAnchor:_probeBtn.bottomAnchor constant:20],
+        [_resultView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:6],
+        [_resultView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-6],
+        [_resultView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-10],
+        
+        [_spinner.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [_spinner.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+    ]];
+}
+
+- (void)startProbe {
+    _probeBtn.enabled = NO; _progress.hidden = NO; _progress.progress = 0;
+    _statusLabel.hidden = NO; _statusLabel.text = @"准备中...";
+    _resultView.text = @""; [_spinner startAnimating];
     __weak typeof(self) ws = self;
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         NSArray *r = [ProbeEngine runProbeWithMaxClasses:300 progress:^(float p, NSString *c) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                ws.probeProgress.progress = p; ws.probeStatusLabel.text = [NSString stringWithFormat:@"%.0f%% %@",p*100,c];
+                ws->_progress.progress = p;
+                ws->_statusLabel.text = [NSString stringWithFormat:@"%.0f%% %@", p*100, c];
             });
         }];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [ws.probeSpinner stopAnimating]; ws.probeButton.enabled = YES;
-            ws.probeProgress.hidden = YES; ws.probeStatusLabel.hidden = YES;
-            ws.probeResultView.text = [ProbeEngine formatReport:r];
-            [UIPasteboard generalPasteboard].string = ws.probeResultView.text;
-            [ws showToast:[NSString stringWithFormat:@"✅ 发现 %lu 项",(unsigned long)r.count]];
+            [ws->_spinner stopAnimating]; ws->_probeBtn.enabled = YES;
+            ws->_progress.hidden = YES; ws->_statusLabel.hidden = YES;
+            ws->_resultView.text = [ProbeEngine formatReport:r];
+            [UIPasteboard generalPasteboard].string = ws->_resultView.text;
         });
     });
 }
+@end
 
-- (void)probeVIPTapped {
-    self.probeButton.enabled = NO; self.probeResultView.text = @"VIP分析中..."; [self.probeSpinner startAnimating];
-    __weak typeof(self) ws = self;
+// ============================================================
+#pragma mark - VIPProbeController
+// ============================================================
+@implementation VIPProbeController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"🦸 VIP 分析";
+    self.view.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+    
+    UILabel *tip = [[UILabel alloc] initWithFrame:CGRectMake(12, 20, self.view.frame.size.width-24, 40)];
+    tip.text = @"正在自动扫描 VIP 相关方法...\n请稍候";
+    tip.textColor = UIColor.lightGrayColor;
+    tip.font = [UIFont systemFontOfSize:13];
+    tip.numberOfLines = 2;
+    tip.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:tip];
+    
+    UIActivityIndicatorView *sp = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+    sp.translatesAutoresizingMaskIntoConstraints = NO;
+    [sp startAnimating];
+    [self.view addSubview:sp];
+    
+    UITextView *tv = [UITextView new];
+    tv.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
+    tv.textColor = [UIColor colorWithRed:0.4 green:0.9 blue:0.4 alpha:1];
+    tv.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    tv.editable = NO; tv.layer.cornerRadius = 8;
+    tv.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:tv];
+    
+    [NSLayoutConstraint activateConstraints:@[
+        [tip.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:10],
+        [tip.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:12],
+        [sp.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [sp.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+        [tv.topAnchor constraintEqualToAnchor:tip.bottomAnchor constant:10],
+        [tv.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:6],
+        [tv.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-6],
+        [tv.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-10],
+    ]];
+    
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         NSArray *r = [ProbeEngine runProbeWithMaxClasses:300 progress:nil];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [ws.probeSpinner stopAnimating]; ws.probeButton.enabled = YES;
-            ws.probeResultView.text = [ProbeEngine formatVIPReport:r];
-            [UIPasteboard generalPasteboard].string = ws.probeResultView.text;
+            [sp stopAnimating];
+            tip.text = @"✅ VIP 分析完成";
+            tv.text = [ProbeEngine formatVIPReport:r];
+            [UIPasteboard generalPasteboard].string = tv.text;
         });
     });
 }
+@end
 
-#pragma mark - 默认值
-
-- (void)buildDefaultsPanel {
-    CGFloat w = self.contentView.frame.size.width, h = self.contentView.frame.size.height;
-    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0,40,w,h-40)]; v.tag = 1004;
-
-    self.defaultsSearchField = [[UITextField alloc] initWithFrame:CGRectMake(10, 8, w-20, 32)];
-    self.defaultsSearchField.placeholder = @"搜索键名"; self.defaultsSearchField.textColor = [UIColor whiteColor];
-    self.defaultsSearchField.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1];
-    self.defaultsSearchField.layer.cornerRadius = 8; self.defaultsSearchField.font = [UIFont systemFontOfSize:13];
-    self.defaultsSearchField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0,0,8,0)];
-    self.defaultsSearchField.leftViewMode = UITextFieldViewModeAlways; self.defaultsSearchField.delegate = self;
-    self.defaultsSearchField.tag = 2001;
-    [self.defaultsSearchField addTarget:self action:@selector(defaultsSearchChanged) forControlEvents:UIControlEventEditingChanged];
-    [v addSubview:self.defaultsSearchField];
-
-    UIButton *copyB = [UIButton buttonWithType:UIButtonTypeSystem];
-    copyB.frame = CGRectMake(w-56, 42, 44, 24); [copyB setTitle:@"📋" forState:UIControlStateNormal];
-    [copyB setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    copyB.backgroundColor = [UIColor colorWithWhite:0.25 alpha:1]; copyB.layer.cornerRadius = 6;
-    [copyB addTarget:self action:@selector(copyDefaultsTapped) forControlEvents:UIControlEventTouchUpInside];
-    [v addSubview:copyB];
-
-    UIButton *refB = [UIButton buttonWithType:UIButtonTypeSystem];
-    refB.frame = CGRectMake(10, 42, 44, 24); [refB setTitle:@"🔄" forState:UIControlStateNormal];
-    [refB setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    refB.backgroundColor = [UIColor colorWithWhite:0.25 alpha:1]; refB.layer.cornerRadius = 6;
-    [refB addTarget:self action:@selector(refreshDefaults) forControlEvents:UIControlEventTouchUpInside];
-    [v addSubview:refB];
-
-    self.defaultsTable = [[UITableView alloc] initWithFrame:CGRectMake(0, 70, w, h-70) style:UITableViewStylePlain];
-    self.defaultsTable.backgroundColor = [UIColor clearColor]; self.defaultsTable.dataSource = self;
-    self.defaultsTable.delegate = self; self.defaultsTable.tag = 3001;
-    self.defaultsTable.separatorColor = [UIColor colorWithWhite:0.3 alpha:0.5];
-    [v addSubview:self.defaultsTable];
-    [self.contentView addSubview:v];
+// ============================================================
+#pragma mark - DefaultsEditorController
+// ============================================================
+@implementation DefaultsEditorController {
+    UISearchController *_searchCtrl;
+    NSArray *_keys;
+    NSDictionary *_data;
 }
 
-- (void)refreshDefaults {
-    NSString *kw = self.defaultsSearchField.text;
-    self.defaultsData = kw.length > 0 ? [UserDefaultsEditor searchDefaultsWithKeyword:kw] : [UserDefaultsEditor allDefaults];
-    self.defaultsKeys = [self.defaultsData.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-    [self.defaultsTable reloadData];
-}
-- (void)defaultsSearchChanged { [self refreshDefaults]; }
-- (void)copyDefaultsTapped {
-    NSString *r = [UserDefaultsEditor formatReport:self.defaultsData];
-    [UIPasteboard generalPasteboard].string = r; [self showToast:@"✅ 已复制"];
-}
-
-#pragma mark - 日志
-
-- (void)buildLogsPanel {
-    CGFloat w = self.contentView.frame.size.width, h = self.contentView.frame.size.height;
-    UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0,40,w,h-40)]; v.tag = 1005;
-
-    self.clearLogButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.clearLogButton.frame = CGRectMake(w-66, 4, 54, 24);
-    [self.clearLogButton setTitle:@"🗑 清除" forState:UIControlStateNormal];
-    [self.clearLogButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.clearLogButton.backgroundColor = [UIColor colorWithWhite:0.25 alpha:1];
-    self.clearLogButton.layer.cornerRadius = 5; self.clearLogButton.titleLabel.font = [UIFont systemFontOfSize:10];
-    [self.clearLogButton addTarget:self action:@selector(clearLogTapped) forControlEvents:UIControlEventTouchUpInside];
-    [v addSubview:self.clearLogButton];
-
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, 6, w-80, 22)];
-    lbl.text = @"📋 Hook 调用日志"; lbl.textColor = [UIColor lightGrayColor]; lbl.font = [UIFont systemFontOfSize:11];
-    [v addSubview:lbl];
-
-    self.logView = [[UITextView alloc] initWithFrame:CGRectMake(6, 32, w-12, h-38)];
-    self.logView.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
-    self.logView.textColor = [UIColor colorWithRed:0.6 green:0.8 blue:1.0 alpha:1];
-    self.logView.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
-    self.logView.editable = NO; self.logView.layer.cornerRadius = 8;
-    self.logView.text = @"使用 Log 类型 Hook 后，调用记录显示在这里。";
-    [v addSubview:self.logView];
-    [self.contentView addSubview:v];
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"⚙️ UserDefaults";
+    self.tableView.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
+    self.tableView.separatorColor = [UIColor colorWithWhite:0.3 alpha:0.4];
+    
+    _searchCtrl = [[UISearchController alloc] initWithSearchResultsController:nil];
+    _searchCtrl.searchResultsUpdater = (id)self;
+    _searchCtrl.obscuresBackgroundDuringPresentation = NO;
+    _searchCtrl.searchBar.placeholder = @"搜索键名";
+    _searchCtrl.searchBar.barStyle = UIBarStyleBlack;
+    self.navigationItem.searchController = _searchCtrl;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    
+    _data = [UserDefaultsEditor allDefaults];
+    _keys = [_data.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
 }
 
-- (void)refreshLogDisplay {
-    NSArray *logs = [MethodHacker hookLogs];
-    self.logView.text = logs.count == 0 ? @"暂无记录" : [[logs reverseObjectEnumerator].allObjects componentsJoinedByString:@"\n"];
-}
-- (void)hookLogDidUpdate:(NSNotification *)note {
-    if (self.currentTab == 4) [self refreshLogDisplay];
-}
-- (void)clearLogTapped { [MethodHacker clearLogs]; [self refreshLogDisplay]; [self showToast:@"✅ 已清除"]; }
-
-#pragma mark - UITableView
-
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)section {
-    return t == self.hooksTable ? MAX(self.hooksList.count,1) : MAX(self.defaultsKeys.count,1);
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)sec {
+    return MAX(_keys.count, 1);
 }
 
-- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c = [t dequeueReusableCellWithIdentifier:@"c"];
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"c"];
     if (!c) {
         c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
-        c.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1];
-        c.textLabel.textColor = [UIColor whiteColor];
-        c.detailTextLabel.textColor = [UIColor lightGrayColor];
+        c.backgroundColor = [UIColor colorWithWhite:0.18 alpha:1];
+        c.textLabel.textColor = UIColor.whiteColor;
+        c.detailTextLabel.textColor = UIColor.lightGrayColor;
         c.textLabel.font = [UIFont systemFontOfSize:12];
         c.detailTextLabel.font = [UIFont systemFontOfSize:10];
     }
-    if (t == self.hooksTable) {
-        if (self.hooksList.count == 0) { c.textLabel.text = @"暂无活跃 Hook"; c.detailTextLabel.text = nil; }
-        else {
-            ActiveHook *h = self.hooksList[ip.row];
-            c.textLabel.text = [NSString stringWithFormat:@"%@.%@", h.className, h.methodName];
-            c.detailTextLabel.text = [NSString stringWithFormat:@"→ %@ (调用%lu次)", h.returnValue?:@"void", (unsigned long)h.callCount];
-        }
+    if (_keys.count == 0) {
+        c.textLabel.text = @"无数据";
+        c.detailTextLabel.text = nil;
     } else {
-        if (self.defaultsKeys.count == 0) { c.textLabel.text = @"无数据"; c.detailTextLabel.text = nil; }
-        else {
-            NSString *k = self.defaultsKeys[ip.row];
-            id v = self.defaultsData[k];
-            c.textLabel.text = k;
-            c.detailTextLabel.text = [v isKindOfClass:NSData.class] ? [NSString stringWithFormat:@"<Data: %lu bytes>",(unsigned long)[(NSData*)v length]] : [NSString stringWithFormat:@"%@",v];
-        }
+        NSString *k = _keys[ip.row];
+        id v = _data[k];
+        c.textLabel.text = k;
+        c.detailTextLabel.text = [v isKindOfClass:NSData.class] ?
+            [NSString stringWithFormat:@"<Data: %lu bytes>", (unsigned long)[(NSData*)v length]] :
+            [NSString stringWithFormat:@"%@", v];
     }
     return c;
 }
 
-- (BOOL)tableView:(UITableView *)t canEditRowAtIndexPath:(NSIndexPath *)ip {
-    return (t == self.hooksTable && self.hooksList.count>0) || (t == self.defaultsTable && self.defaultsKeys.count>0);
+- (BOOL)tableView:(UITableView *)tv canEditRowAtIndexPath:(NSIndexPath *)ip {
+    return _keys.count > 0;
 }
 
-- (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)ed forRowAtIndexPath:(NSIndexPath *)ip {
-    if (t == self.hooksTable) { [MethodHacker unhook:self.hooksList[ip.row]]; [self refreshHooksList]; }
-    else { [UserDefaultsEditor removeKey:self.defaultsKeys[ip.row]]; [self refreshDefaults]; }
-}
-
-- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    if (t == self.defaultsTable && self.defaultsKeys.count>0) {
-        NSString *k = self.defaultsKeys[ip.row];
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:k message:@"新值" preferredStyle:UIAlertControllerStyleAlert];
-        [a addTextFieldWithConfigurationHandler:^(UITextField *t2){ t2.text = [NSString stringWithFormat:@"%@",self.defaultsData[k]?:@""]; }];
-        [a addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(id action){
-            [UserDefaultsEditor setValue:a.textFields[0].text forKey:k];
-            [self refreshDefaults]; [self showToast:@"✅ 已保存"];
-        }]];
-        [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-        [self presentViewController:a animated:YES completion:nil];
+- (void)tableView:(UITableView *)tv commitEditingStyle:(UITableViewCellEditingStyle)ed forRowAtIndexPath:(NSIndexPath *)ip {
+    if (ip.row < _keys.count) {
+        [UserDefaultsEditor removeKey:_keys[ip.row]];
+        _data = [UserDefaultsEditor allDefaults];
+        _keys = [_data.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+        [tv reloadData];
     }
 }
 
-#pragma mark - 辅助
-
-- (void)showToast:(NSString *)msg {
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(0,0,200,30)];
-    l.center = CGPointMake(self.view.frame.size.width/2, 60);
-    l.backgroundColor = [UIColor colorWithWhite:0 alpha:0.85]; l.textColor = [UIColor whiteColor];
-    l.textAlignment = NSTextAlignmentCenter; l.text = msg; l.layer.cornerRadius = 8;
-    l.clipsToBounds = YES; l.font = [UIFont systemFontOfSize:12];
-    [self.view addSubview:l];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [l removeFromSuperview]; });
-}
-
-#pragma mark - UITextFieldDelegate
-- (BOOL)textFieldShouldReturn:(UITextField *)t {
-    if (t == self.searchField) [self searchTapped];
-    else if (t.tag == 2001) [self refreshDefaults];
-    [t resignFirstResponder]; return YES;
+- (void)updateSearchResultsForSearchController:(UISearchController *)sc {
+    NSString *kw = sc.searchBar.text;
+    _data = kw.length ? [UserDefaultsEditor searchDefaultsWithKeyword:kw] : [UserDefaultsEditor allDefaults];
+    _keys = [_data.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    [self.tableView reloadData];
 }
 @end
 
-// ======== FloatingButton Implementation ========
-@implementation FloatingButton
-
-+ (instancetype)sharedButton {
-    if (!_sharedFloatingButton) {
-        CGFloat size = 44;
-        _sharedFloatingButton = [[FloatingButton alloc] initWithFrame:CGRectMake(20, 120, size, size)];
-        _sharedFloatingButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.4 blue:0.8 alpha:0.85];
-        _sharedFloatingButton.layer.cornerRadius = size/2;
-        _sharedFloatingButton.layer.shadowColor = [UIColor blackColor].CGColor;
-        _sharedFloatingButton.layer.shadowOffset = CGSizeMake(0, 2);
-        _sharedFloatingButton.layer.shadowOpacity = 0.4;
-        _sharedFloatingButton.layer.shadowRadius = 4;
-        _sharedFloatingButton.userInteractionEnabled = YES;
-
-        // 图标
-        UILabel *icon = [[UILabel alloc] initWithFrame:_sharedFloatingButton.bounds];
-        icon.text = @"🔧";
-        icon.textAlignment = NSTextAlignmentCenter;
-        icon.font = [UIFont systemFontOfSize:20];
-        icon.userInteractionEnabled = NO;
-        [_sharedFloatingButton addSubview:icon];
-
-        // 点击手势
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(buttonTapped)];
-        [_sharedFloatingButton addGestureRecognizer:tap];
-
-        // 拖拽手势
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(buttonDragged:)];
-        [_sharedFloatingButton addGestureRecognizer:pan];
-    }
-    return _sharedFloatingButton;
-}
-
-+ (void)show {
-    FloatingButton *btn = [self sharedButton];
-    UIWindow *targetWindow = nil;
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
-            if ([s isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene *ws = (UIWindowScene *)s;
-                if (ws.activationState == UISceneActivationStateForegroundActive) {
-                    for (UIWindow *w in ws.windows) {
-                        if (w.isKeyWindow) { targetWindow = w; break; }
-                    }
-                    if (!targetWindow) targetWindow = [ws.windows firstObject];
-                    break;
-                }
-            }
-        }
-    }
-    if (!targetWindow) targetWindow = [UIApplication sharedApplication].keyWindow;
-    if (targetWindow && btn.superview != targetWindow) {
-        [targetWindow addSubview:btn];
-    }
-    btn.hidden = NO;
-    [[UIApplication sharedApplication].keyWindow bringSubviewToFront:btn];
-}
-
-+ (void)hide { _sharedFloatingButton.hidden = YES; }
-
-+ (void)buttonTapped {
-    if ([ToolboxViewController isVisible]) {
-        [ToolboxViewController dismiss];
-    } else {
-        [ToolboxViewController show];
-    }
-}
-
-+ (void)buttonDragged:(UIPanGestureRecognizer *)g {
-    UIView *btn = g.view;
-    CGPoint p = [g translationInView:btn.superview];
-    CGPoint center = CGPointMake(btn.center.x + p.x, btn.center.y + p.y);
-    
-    // 边界约束
-    CGFloat halfW = btn.frame.size.width/2;
-    CGFloat halfH = btn.frame.size.height/2;
-    CGFloat maxX = btn.superview.bounds.size.width - halfW;
-    CGFloat maxY = btn.superview.bounds.size.height - halfH;
-    center.x = MAX(halfW, MIN(maxX, center.x));
-    center.y = MAX(halfH + 50, MIN(maxY, center.y)); // +50 避开状态栏
-    
-    btn.center = center;
-    [g setTranslation:CGPointZero inView:btn.superview];
-    
-    if (g.state == UIGestureRecognizerStateEnded) {
-        // 自动吸附到左右边缘
-        CGFloat leftDist = center.x - halfW;
-        CGFloat rightDist = maxX - center.x;
-        CGFloat targetX = (leftDist < rightDist) ? halfW + 8 : maxX - 8;
-        [UIView animateWithDuration:0.25 animations:^{
-            btn.center = CGPointMake(targetX, btn.center.y);
-        }];
-    }
-}
-
+// ============================================================
+#pragma mark - ToolboxLauncher
+// ============================================================
+@implementation ToolboxLauncher
++ (void)launch { /* 由 FloatingButton +load 自动触发 */ }
 @end
