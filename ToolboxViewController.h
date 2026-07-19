@@ -2,38 +2,38 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// 🚀 工具箱入口：创建浮动按钮
-@interface ToolboxLauncher : NSObject
-+ (void)launch;
-@end
-
-/// 🔧 浮动按钮（可拖拽）
+/// 🔧 浮动按钮
 @interface FloatingButton : UIView
 + (instancetype)sharedButton;
 @end
 
-/// 📋 主菜单列表
+/// 📋 主菜单
 @interface ToolboxMenuController : UITableViewController
++ (void)show;
 @end
 
 /// 🔍 类搜索
-@interface ClassSearchController : UIViewController
+@interface ClassSearchController : UIViewController <UITextFieldDelegate>
+@end
+
+/// ⚡ 快速 Hook
+@interface QuickHookController : UIViewController
 @end
 
 /// 🪝 Hook 管理
 @interface HookManageController : UITableViewController
 @end
 
-/// 📡 运行时探测
+/// 📡 探测
 @interface ProbeController : UIViewController
 @end
 
-/// ⚙️ 默认值编辑器  
-@interface DefaultsEditorController : UITableViewController
+/// 🦸 VIP 分析
+@interface VIPProbeController : UIViewController
 @end
 
-/// 📋 Hook 日志
-@interface HookLogController : UIViewController
+/// ⚙️ UserDefaults
+@interface DefaultsEditorController : UITableViewController <UISearchResultsUpdating>
 @end
 
 NS_ASSUME_NONNULL_END
