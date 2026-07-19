@@ -1,8 +1,7 @@
 PROJECT = ClassDumpDylib
 OUTDIR  = packages
-FILES   = ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m MethodHacker.m UserDefaultsEditor.m
+FILES   = ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m MethodHacker.m UserDefaultsEditor.m ProbeEngine.m
 
-# 强制修复 UIAccessibilityTraits 报错的关键参数: -Wno-everything 是为了跳过所有不必要的干扰警告
 CFLAGS  = -fobjc-arc -I. -O2 -Wno-everything -include UIKit/UIKit.h
 LDFLAGS = -dynamiclib -lobjc \
           -framework UIKit \
