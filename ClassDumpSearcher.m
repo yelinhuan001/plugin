@@ -39,15 +39,16 @@
 
         // 列出部分实例方法
         unsigned int methodCount = 0;
-        Method *methods = class_copyMethodList(NSClassFromString(className), &methodCount);
-        if (methodCount > 0) {
+        Class cls = NSClassFromString(className);
+        if (!cls) continue; // 类已不存在，跳过
+        
+        Method *methods = class_copyMethodList(cls, &methodCount);
+        if (methods && methodCount > 0) {
             [report appendFormat:@"  └─ 方法 (%d):\n", methodCount];
-            // 只显示前 20 个方法
             unsigned int showCount = MIN(methodCount, 20);
             for (unsigned int j = 0; j < showCount; j++) {
                 SEL sel = method_getName(methods[j]);
                 NSString *selName = NSStringFromSelector(sel);
-                // 过滤无关的 getter/setter
                 if ([selName hasPrefix:@"."]) continue;
                 [report appendFormat:@"       %@\n", selName];
             }
@@ -57,7 +58,7 @@
         } else {
             [report appendFormat:@"  └─ (无实例方法)\n"];
         }
-        free(methods);
+        if (methods) free(methods);
     }
 
     // 自动复制到剪贴板
