@@ -1,6 +1,6 @@
 PROJECT = ClassDumpDylib
 OUTDIR  = packages
-FILES   = ClassDumpEntry.m ClassDumpSearcher.m SearchOverlayWindow.m MethodHacker.m UserDefaultsEditor.m ProbeEngine.m
+FILES   = ClassDumpEntry.m ClassDumpSearcher.m ToolboxViewController.m MethodHacker.m UserDefaultsEditor.m ProbeEngine.m
 
 CFLAGS  = -fobjc-arc -I. -O2 -Wno-everything -include UIKit/UIKit.h
 LDFLAGS = -dynamiclib -lobjc \
