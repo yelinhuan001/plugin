@@ -110,7 +110,8 @@ static NSArray<NSString *> *_defaultKeywords = nil;
 
         int processed = 0;
         for (int i = 0; i < totalClasses && processed < limit; i++) {
-            NSString *className = NSStringFromClass(classes[i]);
+            @autoreleasepool {
+                NSString *className = NSStringFromClass(classes[i]);
             if ([self isSystemClass:className]) continue;
             if ([className hasPrefix:@"Probe"]) continue; // 过滤自己
             if ([className hasPrefix:@"Search"]) continue;
@@ -136,6 +137,7 @@ static NSArray<NSString *> *_defaultKeywords = nil;
                                isClassMethod:YES
                                   keywords:keywords
                                    results:results];
+            }
             }
         }
         free(classes);
@@ -187,75 +189,15 @@ static NSArray<NSString *> *_defaultKeywords = nil;
         result.matchedKeyword = matched;
         result.isGetter = YES;
 
-        // 获取返回类型
+        // 获取返回类型（安全：只读取编码，不调用方法）
         char returnType[256] = {0};
         method_getReturnType(methods[j], returnType, sizeof(returnType));
         result.returnType = [NSString stringWithUTF8String:returnType];
-
-        // 尝试调用 getter 获取值
-        @try {
-            id target = nil;
-            if (isClassMethod) {
-                target = cls;
-            } else {
-                // 先尝试 sharedInstance/shared
-                SEL sharedSel = NSSelectorFromString(@"sharedInstance");
-                if (![cls respondsToSelector:sharedSel]) {
-                    sharedSel = NSSelectorFromString(@"shared");
-                }
-                if ([cls respondsToSelector:sharedSel]) {
-                    target = [cls performSelector:sharedSel];
-                } else {
-                    // 尝试 alloc/init
-                    id alloced = [cls alloc];
-                    if (alloced) {
-                        target = [alloced init];
-                        if (!target) target = alloced;
-                    }
-                }
-            }
-
-            if (target && [target respondsToSelector:sel]) {
-                NSMethodSignature *sig = [target methodSignatureForSelector:sel];
-                if (sig && sig.numberOfArguments == 2) { // 无参数方法
-                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                    inv.target = target;
-                    inv.selector = sel;
-                    [inv invoke];
-
-                    const char *type = sig.methodReturnType;
-                    if (type[0] == @encode(BOOL)[0]) {
-                        BOOL val = 0;
-                        [inv getReturnValue:&val];
-                        result.returnValue = @(val);
-                    } else if (type[0] == @encode(int)[0]) {
-                        int val = 0;
-                        [inv getReturnValue:&val];
-                        result.returnValue = @(val);
-                    } else if (type[0] == @encode(NSInteger)[0]) {
-                        NSInteger val = 0;
-                        [inv getReturnValue:&val];
-                        result.returnValue = @(val);
-                    } else if (type[0] == @encode(double)[0]) {
-                        double val = 0;
-                        [inv getReturnValue:&val];
-                        result.returnValue = @(val);
-                    } else if (type[0] == @encode(float)[0]) {
-                        float val = 0;
-                        [inv getReturnValue:&val];
-                        result.returnValue = @(val);
-                    } else if (type[0] == @encode(id)[0]) {
-                        __unsafe_unretained id val = nil;
-                        [inv getReturnValue:&val];
-                        result.returnValue = val;
-                    } else if (type[0] == @encode(void)[0]) {
-                        result.isGetter = NO;
-                    }
-                }
-            }
-        } @catch (NSException *e) {
-            result.returnValue = [NSString stringWithFormat:@"<exception: %@>", e.reason];
-        }
+        result.isGetter = YES;
+        
+        // 注意：不调用实际 getter 以避免 crash
+        // 用户可以根据方法名和返回类型手动尝试 Hook
+        result.returnValue = nil;
 
         [results addObject:result];
     }
@@ -296,8 +238,7 @@ static NSArray<NSString *> *_defaultKeywords = nil;
         [report appendFormat:@"\n【%@】(%lu 个)\n", kw, (unsigned long)list.count];
         for (ProbeResult *r in list) {
             NSString *type = r.isClassMethod ? @"+" : @"-";
-            NSString *valueStr = r.isGetter ? (r.returnValue ? [NSString stringWithFormat:@" = %@", r.returnValue] : @" = ?") : @" (void)";
-            [report appendFormat:@"  %@[%@ %@]%@\n", type, r.className, r.methodName, valueStr];
+            [report appendFormat:@"  %@[%@ %@]  [%@]\n", type, r.className, r.methodName, r.returnType];
         }
     }
 
@@ -328,11 +269,10 @@ static NSArray<NSString *> *_defaultKeywords = nil;
 
     for (ProbeResult *r in vipResults) {
         NSString *type = r.isClassMethod ? @"+" : @"-";
-        NSString *valueStr = r.isGetter ? (r.returnValue ? [NSString stringWithFormat:@" → %@", r.returnValue] : @" → ?") : @"";
-        [report appendFormat:@"%@[%@ %@] %@%@\n", type, r.className, r.methodName, r.returnType, valueStr];
+        [report appendFormat:@"%@[%@ %@] %@\n", type, r.className, r.methodName, r.returnType];
     }
 
-    [report appendString:@"\n💡 建议：点击可将返回值改为 YES/NO"];
+    [report appendString:@"\n💡 建议：在 Hook 面板中添加对应 Hook"];
     return report;
 }
 
